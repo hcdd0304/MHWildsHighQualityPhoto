@@ -21,6 +21,7 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
     }
 
     auto capture_state_ptr = album_manager->get_field<int>("_SaveCaptureState");
+    auto api = webp_capture_injector_instance->api;
 
     if (capture_state_ptr != nullptr) {
         SaveCaptureState capture_state = static_cast<SaveCaptureState>(*capture_state_ptr);

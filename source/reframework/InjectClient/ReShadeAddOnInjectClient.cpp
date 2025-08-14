@@ -137,6 +137,8 @@ bool ReShadeAddOnInjectClient::provide_webp_data(bool is16x9, ProvideFinishedDat
     this->provide_data_finish_callback = provide_data_finish_callback;
     this->is_16x9 = is16x9;
     this->request_launched = false;
+    this->prepare_state = CapturePrepareState::WaitingHideUI;
+    this->freeze_timescale_frame_left = -1;
 
     auto mod_settings = ModSettings::get_instance();
     game_ui_controller->hide_for(std::max<int>(HIDE_UI_FRAMES_COUNT_MIN, std::round(
@@ -166,6 +168,84 @@ void ReShadeAddOnInjectClient::update() {
         return;
     }
 
+    auto game_ui_controller = GameUIController::get_instance();
+
+    if (game_ui_controller == nullptr) {
+        return;
+    }
+
+    if (!request_launched) {
+        if (prepare_state == CapturePrepareState::WaitingHideUI) {
+            if (game_ui_controller->get_hiding_progress() >= START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS) {
+                prepare_state = CapturePrepareState::FreezeScene;
+                freeze_timescale_frame_left = MIN_FREEZE_TIMESCALE_FRAME_COUNT;
+                freeze_timescale_frame_total = MIN_FREEZE_TIMESCALE_FRAME_COUNT;
+            }
+        }
+
+        if (prepare_state == CapturePrepareState::FreezeScene) {
+            auto frame_freezed = freeze_timescale_frame_total - freeze_timescale_frame_left;
+
+            if (frame_freezed >= START_CAPTURE_AFTER_FREEZE_FRAME_COUNT) {
+                prepare_state = CapturePrepareState::Complete;
+            }
+        }
+
+        if (prepare_state == CapturePrepareState::Complete) {
+            // Start the capture process
+            launch_capture_implement();
+            prepare_state = CapturePrepareState::None;
+        }
+    }
+}
+
+void ReShadeAddOnInjectClient::late_update() {
+    if (!is_enabled) {
+        return;
+    }
+
+    auto& api = reframework::API::get();
+
+    if (api == nullptr) {
+        return;
+    }
+
+    auto vm_context = api->get_vm_context();
+
+    if (freeze_timescale_frame_left >= 0) {
+        if (!time_scale_cached) {
+            auto current_scene = get_current_scene_method->call<void*>(vm_context, scene_manager);
+            previous_timescale = get_timescale_method->call<float>(vm_context, current_scene);
+
+            time_scale_cached = true;
+        }
+
+        auto context = api->get_vm_context();
+        auto current_scene = get_current_scene_method->call<void*>(context, scene_manager);
+        
+        float target_timescale = 0.0f;
+
+        if (freeze_timescale_frame_left == 0) {
+            target_timescale = previous_timescale;
+            time_scale_cached = false;
+        }
+
+        api->log_info("Freezing timescale, frame left: %d, total: %d, target frame scale: %f", freeze_timescale_frame_left, freeze_timescale_frame_total, target_timescale);
+        set_timescale_method->call<void>(context, current_scene, target_timescale);
+    }
+}
+
+void ReShadeAddOnInjectClient::end_rendering() {
+    if (!is_enabled) {
+        return;
+    }
+
+    if (freeze_timescale_frame_left >= 0) {
+        freeze_timescale_frame_left--;
+    }
+}
+
+void ReShadeAddOnInjectClient::launch_capture_implement() {
     auto& api = reframework::API::get();
     auto game_ui_controller = GameUIController::get_instance();
     auto mod_settings = ModSettings::get_instance();
@@ -174,28 +254,24 @@ void ReShadeAddOnInjectClient::update() {
         return;
     }
 
-    if (!request_launched) {
-        if (game_ui_controller->get_hiding_progress() >= START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS) {
-            if (is_reshade_present()) {
-                bool screenshot_before_reshade = quest_result_hq_background_mode == QuestResultHQBackgroundMode::NoReshade ||
-                    quest_result_hq_background_mode == QuestResultHQBackgroundMode::ReshadeApplyLater;
+    if (is_reshade_present()) {
+        bool screenshot_before_reshade = quest_result_hq_background_mode == QuestResultHQBackgroundMode::NoReshade ||
+            quest_result_hq_background_mode == QuestResultHQBackgroundMode::ReshadeApplyLater;
 
-                auto request_capture = request_reshade_screen_capture(capture_screenshot_callback, mod_settings->hdr_bits, screenshot_before_reshade);
-                if (request_capture != RESULT_SCREEN_CAPTURE_SUBMITTED) {
-                    api->log_error("Request capture failed %d", request_capture);
-                    finish_capture(false);
-                }
-                else {
-                    api->log_info("Request capture submitted successfully");
-                }
-            } else {
-                api->log_error("Failed to load reshade module");
-                finish_capture(false);
-            }
-
-            request_launched = true;
+        auto request_capture = request_reshade_screen_capture(capture_screenshot_callback, mod_settings->hdr_bits, screenshot_before_reshade);
+        if (request_capture != RESULT_SCREEN_CAPTURE_SUBMITTED) {
+            api->log_error("Request capture failed %d", request_capture);
+            finish_capture(false);
         }
+        else {
+            api->log_info("Request capture submitted successfully");
+        }
+    } else {
+        api->log_error("Failed to load reshade module");
+        finish_capture(false);
     }
+
+    request_launched = true;
 }
 
 bool ReShadeAddOnInjectClient::try_load_reshade() {
@@ -469,6 +545,23 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     if (!try_load_reshade()) {
         api->log_error("Failed to load ReShade module");
     }
+
+    auto tdb = api->tdb();
+
+    if (tdb == nullptr) {
+        return;
+    }
+
+    scene_manager = api->get_native_singleton("via.SceneManager");
+    auto scene_manager_type = tdb->find_type("via.SceneManager");
+    get_current_scene_method = scene_manager_type->find_method("get_CurrentScene");
+
+    auto scene_type = tdb->find_type("via.Scene");
+    set_timescale_method = scene_type->find_method("set_TimeScale");
+    get_timescale_method = scene_type->find_method("get_TimeScale");
+
+    prepare_state = CapturePrepareState::None;
+    freeze_timescale_frame_left = -1;
 }
 
 ReShadeAddOnInjectClient::~ReShadeAddOnInjectClient() {

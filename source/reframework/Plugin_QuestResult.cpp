@@ -13,6 +13,7 @@
 #include "MHWildsTypes.h"
 #include "ModSettings.hpp"
 #include "InjectClient/ReShadeAddOnInjectClient.hpp"
+#include "InjectClient/GameProducedMaxQualityInjectClient.hpp"
 #include "WebPCaptureInjector.hpp"
 #include "REFrameworkBorrowedAPI.hpp"
 #include "CaptureResolutionInject.hpp"
@@ -71,6 +72,9 @@ void Plugin_QuestResult::decide_and_set_screen_cap_or_override_inject(std::uniqu
 
     injector->set_inject_client(reshade_addon_client);
 
+    auto game_max_quality_inject_client = GameProducedMaxQualityInjectClient::get_instance();
+    game_max_quality_inject_client->set_enable(false);
+
     bool is_overriden = false;
 
     if (should_override) {
@@ -85,11 +89,23 @@ void Plugin_QuestResult::decide_and_set_screen_cap_or_override_inject(std::uniqu
             is_overriden = true;
         }
     }
+    else {
+        if (!is_photo_mode) {
+            if (mod_settings->quest_result_hq_background_mode == QuestResultHQBackgroundMode::REEngineFrame) {
+                reshade_addon_client->set_enable(false);
+                game_max_quality_inject_client->set_enable(true);
+
+                injector->set_inject_client(game_max_quality_inject_client);
+            }
+        }
+    }
 
     auto resolution_inject = CaptureResolutionInject::get_instance();
 
     if (!is_overriden) {
-        reshade_addon_client->set_requested();
+        if (mod_settings->quest_result_hq_background_mode != QuestResultHQBackgroundMode::REEngineFrame) {
+            reshade_addon_client->set_requested();
+        }
         resolution_inject->update_resolution();
     } else {
         resolution_inject->revert();
@@ -204,6 +220,20 @@ void Plugin_QuestResult::update() {
     }
 }
 
+void Plugin_QuestResult::late_update() {
+    auto reshade_addon_client = ReShadeAddOnInjectClient::get_instance();
+    if (reshade_addon_client != nullptr) {
+        reshade_addon_client->late_update();
+    }
+}
+
+void Plugin_QuestResult::end_rendering() {
+    auto reshade_addon_client = ReShadeAddOnInjectClient::get_instance();
+    if (reshade_addon_client != nullptr) {
+        reshade_addon_client->end_rendering();
+    }
+}
+
 static const char *get_quest_result_hq_background_mode_name(QuestResultHQBackgroundMode mode) {
     switch (mode) {
         case ReshadePreapplied:
@@ -212,6 +242,8 @@ static const char *get_quest_result_hq_background_mode_name(QuestResultHQBackgro
             return "No ReShade";
         case ReshadeApplyLater:
             return "Normal (ReShade Apply Later)";
+        case REEngineFrame:
+            return "REEngine Frame";
         default:
             return "Unknown";
     }
@@ -222,6 +254,8 @@ static void igTextBulletWrapped(const char *bullet, const char *text) {
     igSameLine(0.0f, 5.0f);
     igTextWrapped(text);
 }
+
+bool test_timescale = false;
 
 void Plugin_QuestResult::draw_user_interface() {
     if (igCollapsingHeader_TreeNodeFlags("HQ Quest Result Background", ImGuiTreeNodeFlags_None)) {
@@ -293,6 +327,10 @@ void Plugin_QuestResult::draw_user_interface() {
             if (igBeginCombo("##QuestResultHQBackgroundMode", get_quest_result_hq_background_mode_name(mod_settings->quest_result_hq_background_mode), ImGuiComboFlags_None)) {
                 bool selected = false;
 
+                if (igSelectable_BoolPtr(get_quest_result_hq_background_mode_name(QuestResultHQBackgroundMode::REEngineFrame), &selected, ImGuiSelectableFlags_None, ImVec2(0, 0))) {
+                    mod_settings->quest_result_hq_background_mode = REEngineFrame;
+                }
+
                 if (igSelectable_BoolPtr(get_quest_result_hq_background_mode_name(QuestResultHQBackgroundMode::ReshadeApplyLater), &selected, ImGuiSelectableFlags_None, ImVec2(0, 0))) {
                     mod_settings->quest_result_hq_background_mode = ReshadeApplyLater;
                 }
@@ -306,6 +344,12 @@ void Plugin_QuestResult::draw_user_interface() {
                 }
 
                 igEndCombo();
+            }
+
+            if (mod_settings->quest_result_hq_background_mode == REEngineFrame) {
+                igTextWrapped("The mod will force the game to take a snapshot of the screen in WebP format, with the quality parameter being 100. This may produce image that is less affected by frame generation artifacts.");
+                igTextWrapped("The quality parameter determines how severe the loss by compression is. Higher quality means less loss.");
+                igTextWrapped("By default, the game captures the snapshot with the highest quality parameter being 80. The quality will be reduced until the result image in WebP format is less then 256KB.");
             }
 
             if (mod_settings->quest_result_hq_background_mode == ReshadePreapplied) {
@@ -415,6 +459,7 @@ void Plugin_QuestResult::initialize(const REFrameworkPluginInitializeParam *para
     GameUIController::initialize(params);
     ReShadeAddOnInjectClient::initialize();
     CaptureResolutionInject::initialize(api.get());
+    GameProducedMaxQualityInjectClient::initialize(api.get());
 }
 
 Plugin_QuestResult *Plugin_QuestResult::get_instance() {

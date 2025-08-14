@@ -112,4 +112,20 @@ void PluginBase::base_initialize(PluginBase *plugin, const REFrameworkPluginInit
             plugin->update();
         }
     });
+
+    params->functions->on_pre_application_entry("LateUpdateBehavior", []() {
+        auto plugin = get_plugin_base_instance();
+
+        if (plugin != nullptr) {
+            plugin->late_update();
+        }
+    });
+
+    params->functions->on_pre_application_entry("EndRendering", []() {
+        auto plugin = get_plugin_base_instance();
+
+        if (plugin != nullptr) {
+            plugin->end_rendering();
+        }
+    });
 }

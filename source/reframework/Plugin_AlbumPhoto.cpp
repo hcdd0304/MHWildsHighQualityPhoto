@@ -63,6 +63,12 @@ void Plugin_QuestResult::post_save_capture_photo_hook(void** ret_val, REFramewor
 void Plugin_QuestResult::update() {
 }
 
+void Plugin_QuestResult::late_update() {
+}
+
+void Plugin_QuestResult::end_rendering() {
+}
+
 static void igTextBulletWrapped(const char *bullet, const char *text) {
     igTextWrapped(bullet);
     igSameLine(0.0f, 5.0f);

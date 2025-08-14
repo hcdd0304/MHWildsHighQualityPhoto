@@ -25,7 +25,9 @@ private:
 
 protected:
     void update() override;
+    void late_update() override;
     void draw_user_interface() override;
+    void end_rendering() override;
 
 public:
     explicit Plugin_QuestResult(const REFrameworkPluginInitializeParam *params);

@@ -3,6 +3,8 @@ set(MHWildsHQQuestResultPhoto_SOURCES
         "InjectClient/FileInjectClient.hpp"
         "InjectClient/ReShadeAddOnInjectClient.cpp"
         "InjectClient/ReShadeAddOnInjectClient.hpp"
+        "InjectClient/GameProducedMaxQualityInjectClient.cpp"
+        "InjectClient/GameProducedMaxQualityInjectClient.hpp"
         "CaptureResolutionInject.cpp"
         "CaptureResolutionInject.hpp"
         "CImGuiRouteFix.cpp"

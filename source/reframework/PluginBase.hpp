@@ -11,6 +11,8 @@ private:
 protected:
     virtual void draw_user_interface() = 0;
     virtual void update() = 0;
+    virtual void late_update() = 0;
+    virtual void end_rendering() = 0;
 
     void draw_user_interface_path(const std::string &label, std::string &target_path, bool limit_size);
 

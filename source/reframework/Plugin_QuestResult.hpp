@@ -26,6 +26,8 @@ private:
 protected:
     void draw_user_interface() override;
     void update() override;
+    void late_update() override;
+    void end_rendering() override;
 
 private:
     // Hooks

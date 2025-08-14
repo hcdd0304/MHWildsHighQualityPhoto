@@ -18,6 +18,16 @@
 
 class ReShadeAddOnInjectClient : public WebPCaptureInjectClient {
 private:
+    const int MIN_FREEZE_TIMESCALE_FRAME_COUNT = 3;
+    const int START_CAPTURE_AFTER_FREEZE_FRAME_COUNT = 2;
+
+    enum class CapturePrepareState {
+        None,
+        WaitingHideUI,
+        FreezeScene,
+        Complete
+    };
+
     ProvideFinishedDataCallback provide_data_finish_callback;
 
     HMODULE reshade_module = nullptr;
@@ -42,6 +52,17 @@ private:
     bool slowmo_present_cached = false;
     bool is_requested = false;
 
+    CapturePrepareState prepare_state = CapturePrepareState::None;
+    int freeze_timescale_frame_left = 0;
+    int freeze_timescale_frame_total = 0;
+
+    void *scene_manager = nullptr;
+    reframework::API::Method *get_current_scene_method = nullptr;
+    reframework::API::Method *set_timescale_method = nullptr;
+    reframework::API::Method *get_timescale_method = nullptr;
+    float previous_timescale = 1.0f;
+    bool time_scale_cached = false;
+
 private:
     bool try_load_reshade();
     bool end_slowmo_present();
@@ -58,6 +79,7 @@ private:
     static void null_post(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
 
     bool should_reshade_filters_disable_when_show_quest_result_ui() const;
+    void launch_capture_implement();
 
 public:
     ~ReShadeAddOnInjectClient();
@@ -67,6 +89,8 @@ public:
 
     bool provide_webp_data(bool is16x9, ProvideFinishedDataCallback provide_data_finish_callback) override;
     void update();
+    void late_update();
+    void end_rendering();
 
     void set_enable(bool enable) {
         is_enabled = enable;
