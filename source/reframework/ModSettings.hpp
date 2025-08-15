@@ -71,7 +71,7 @@ struct ModSettings {
 
     bool fix_framegen_artifacts = true;
 
-    int freeze_game_frames = 4;
+    int freeze_game_frames = 5;
 
     bool data_changed(const ModSettings &clone) {
         return enable_override_album_image != clone.enable_override_album_image ||

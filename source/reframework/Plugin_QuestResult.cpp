@@ -347,22 +347,24 @@ void Plugin_QuestResult::draw_user_interface() {
             }
 
             if (mod_settings->quest_result_hq_background_mode == REEngineFrame) {
-                igTextWrapped("The mod will force the game to take a snapshot of the screen in WebP format, with the quality parameter being 100. This may produce image that is less affected by frame generation artifacts.");
-                igTextWrapped("The quality parameter determines how severe the loss by compression is. Higher quality means less loss.");
-                igTextWrapped("By default, the game captures the snapshot with the highest quality parameter being 80. The quality will be reduced until the result image in WebP format is less then 256KB.");
+                igTextWrapped("The mod forces the game to take a screenshot in maximum quality. The resulting image will still be affected by compression, but it's lighter than usual.");
+                igTextWrapped("Artifacts caused by frame generation will not appear in this mode.");
             }
 
             if (mod_settings->quest_result_hq_background_mode == ReshadePreapplied) {
                 igTextWrapped("The mod will take a screenshot with ReShade applied. When this screenshot is shown on quest result screen, ReShade will be disabled.");
                 igTextWrapped("This ensures some ReShade effects that relies on the depth buffer displays correctly. Use this if you have problem with the default mode.");
+                igTextWrapped("Turn on Fix Frame Generation Artifacts (on by default) to fix artifacts caused by frame generation.");
             }
 
             if (mod_settings->quest_result_hq_background_mode == ReshadeApplyLater) {
                 igTextWrapped("The mod will take a screenshot without ReShade. When this screenshot is shown on quest result screen, the image will be shown with ReShade applied.");
+                igTextWrapped("Turn on Fix Frame Generation Artifacts (on by default) to fix artifacts caused by frame generation.");
             }
 
             if (mod_settings->quest_result_hq_background_mode == NoReshade) {
                 igTextWrapped("The mod will take a screenshot without ReShade. When this screenshot is shown on quest result screen, the image will be shown without ReShade applied.");
+                igTextWrapped("Turn on Fix Frame Generation Artifacts (on by default) to fix artifacts caused by frame generation.");
             }
 
             igSeparator();
@@ -393,6 +395,8 @@ void Plugin_QuestResult::draw_user_interface() {
                 igText("Freeze Game Frame Count");
                 igSameLine(0.0f, 5.0f);
                 igInputInt("##FreezeGameFrameCount", &mod_settings->freeze_game_frames, 1, 1, ImGuiInputTextFlags_None);
+
+                igTreePop();
             }
 
             igTreePop();
@@ -411,7 +415,7 @@ void Plugin_QuestResult::draw_user_interface() {
                 igSetTooltip("This will dump the the PNG screenshot the mod captured to the game directory.");
             }
 
-            igText("Path to WebP: <GameDir>/reframework/data/MHWilds_HighQualityPhotoMod_HighQuality_QuestResult.png");
+            igText("Path to WebP: <GameDir>/reframework/data/MHWilds_HighQualityPhotoMod_HighQuality_QuestResult.png/webp");
             igTreePop();
         }
 
