@@ -17,13 +17,13 @@
 
 #include <nfd.hpp>
 
-std::unique_ptr<Plugin_QuestResult> plugin_instance = nullptr;
+std::unique_ptr<Plugin_AlbumPhoto> plugin_instance = nullptr;
 
 PluginBase *get_plugin_base_instance() {
     return reinterpret_cast<PluginBase*>(plugin_instance.get());
 }
 
-void Plugin_QuestResult::set_capture_again() {
+void Plugin_AlbumPhoto::set_capture_again() {
     auto mod_settings = ModSettings::get_instance();
     auto injector = WebPCaptureInjector::get_instance();
 
@@ -45,7 +45,7 @@ void Plugin_QuestResult::set_capture_again() {
     injector->set_inject_pending();
 }
 
-int Plugin_QuestResult::pre_save_capture_photo_hook(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+int Plugin_AlbumPhoto::pre_save_capture_photo_hook(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
     auto mod_settings = ModSettings::get_instance();
 
     if (mod_settings == nullptr) {
@@ -56,17 +56,17 @@ int Plugin_QuestResult::pre_save_capture_photo_hook(int argc, void** argv, REFra
     return REFRAMEWORK_HOOK_CALL_ORIGINAL;
 }
 
-void Plugin_QuestResult::post_save_capture_photo_hook(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
+void Plugin_AlbumPhoto::post_save_capture_photo_hook(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
 
 }
 
-void Plugin_QuestResult::update() {
+void Plugin_AlbumPhoto::update() {
 }
 
-void Plugin_QuestResult::late_update() {
+void Plugin_AlbumPhoto::late_update() {
 }
 
-void Plugin_QuestResult::end_rendering() {
+void Plugin_AlbumPhoto::end_rendering() {
 }
 
 static void igTextBulletWrapped(const char *bullet, const char *text) {
@@ -75,7 +75,7 @@ static void igTextBulletWrapped(const char *bullet, const char *text) {
     igTextWrapped(text);
 }
 
-void Plugin_QuestResult::draw_user_interface() {
+void Plugin_AlbumPhoto::draw_user_interface() {
     if (igCollapsingHeader_TreeNodeFlags("Custom Photos", ImGuiTreeNodeFlags_None)) {
         auto mod_settings = ModSettings::get_instance();
         auto mod_settings_copy = *mod_settings;
@@ -132,7 +132,7 @@ void Plugin_QuestResult::draw_user_interface() {
     }
 }
 
-Plugin_QuestResult::Plugin_QuestResult(const REFrameworkPluginInitializeParam *params) {
+Plugin_AlbumPhoto::Plugin_AlbumPhoto(const REFrameworkPluginInitializeParam *params) {
     auto& api = reframework::API::get();
     auto tdb = api->tdb();
 
@@ -145,25 +145,22 @@ Plugin_QuestResult::Plugin_QuestResult(const REFrameworkPluginInitializeParam *p
     album_photo_force_client->set_limit_size(true);
 }
 
-void Plugin_QuestResult::initialize(const REFrameworkPluginInitializeParam *params) {
+void Plugin_AlbumPhoto::initialize(const REFrameworkPluginInitializeParam *params) {
     static const char *SETTINGS_NAME = "mhwilds_custom_album_photo";
     static const char *DEBUG_FILE_POSTFIX = "PhotoMode";
 
-    plugin_instance = std::make_unique<Plugin_QuestResult>(params);
+    plugin_instance = std::make_unique<Plugin_AlbumPhoto>(params);
     PluginBase::base_initialize(plugin_instance.get(), params, SETTINGS_NAME, DEBUG_FILE_POSTFIX);
 }
 
-Plugin_QuestResult *Plugin_QuestResult::get_instance() {
+Plugin_AlbumPhoto *Plugin_AlbumPhoto::get_instance() {
     return plugin_instance ? plugin_instance.get() : nullptr;
 }
 
-#define REFRAMEWORK_PLUGIN_VERSION_MINOR_OLD 10
-#define REFRAMEWORK_PLUGIN_VERSION_PATCH_OLD 0
-
 extern "C" __declspec(dllexport) void reframework_plugin_required_version(REFrameworkPluginVersion* version) {
     version->major = REFRAMEWORK_PLUGIN_VERSION_MAJOR;
-    version->minor = REFRAMEWORK_PLUGIN_VERSION_MINOR_OLD;
-    version->patch = REFRAMEWORK_PLUGIN_VERSION_PATCH_OLD;
+    version->minor = REFRAMEWORK_PLUGIN_VERSION_MINOR;
+    version->patch = REFRAMEWORK_PLUGIN_VERSION_PATCH;
 
     // Optionally, specify a specific game name that this plugin is compatible with.
     version->game_name = "MHWILDS";
@@ -171,7 +168,7 @@ extern "C" __declspec(dllexport) void reframework_plugin_required_version(REFram
 
 extern "C" __declspec(dllexport) bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param) {
     reframework::API::initialize(param);
-    Plugin_QuestResult::initialize(param);
+    Plugin_AlbumPhoto::initialize(param);
 
     return true;
 }

@@ -11,7 +11,7 @@
 
 struct ModSettings;
 
-class Plugin_QuestResult : PluginBase {
+class Plugin_AlbumPhoto : PluginBase {
 private:
     std::unique_ptr<FileInjectClient> album_photo_force_client;
     std::unique_ptr<NullCaptureInjectClient> null_capture_client;
@@ -30,9 +30,9 @@ protected:
     void end_rendering() override;
 
 public:
-    explicit Plugin_QuestResult(const REFrameworkPluginInitializeParam *params);
-    ~Plugin_QuestResult() = default;
+    explicit Plugin_AlbumPhoto(const REFrameworkPluginInitializeParam *params);
+    ~Plugin_AlbumPhoto() = default;
 
     static void initialize(const REFrameworkPluginInitializeParam *params);
-    static Plugin_QuestResult *get_instance();
+    static Plugin_AlbumPhoto *get_instance();
 };
