@@ -17,10 +17,11 @@
 #include <Windows.h>
 
 class ReShadeAddOnInjectClient : public WebPCaptureInjectClient {
-private:
-    const int MIN_FREEZE_TIMESCALE_FRAME_COUNT = 3;
-    const int START_CAPTURE_AFTER_FREEZE_FRAME_COUNT = 2;
+public:
+    static constexpr int MIN_FREEZE_TIMESCALE_FRAME_COUNT = 4;
+    static constexpr int MAX_FREEZE_TIMESCALE_FRAME_COUNT = 16;
 
+private:
     enum class CapturePrepareState {
         None,
         WaitingHideUI,
@@ -56,8 +57,6 @@ private:
     int freeze_timescale_frame_left = 0;
     int freeze_timescale_frame_total = 0;
 
-    void *scene_manager = nullptr;
-    reframework::API::Method *get_current_scene_method = nullptr;
     reframework::API::Method *set_timescale_method = nullptr;
     reframework::API::Method *get_timescale_method = nullptr;
     float previous_timescale = 1.0f;

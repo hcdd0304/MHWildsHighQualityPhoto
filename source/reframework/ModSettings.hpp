@@ -69,6 +69,10 @@ struct ModSettings {
     // correctly
     bool auto_fix_quest_result_brightness = true;
 
+    bool fix_framegen_artifacts = true;
+
+    int freeze_game_frames = 4;
+
     bool data_changed(const ModSettings &clone) {
         return enable_override_album_image != clone.enable_override_album_image ||
             override_album_image_path != clone.override_album_image_path ||
@@ -89,7 +93,9 @@ struct ModSettings {
             hide_ui_before_capture_frame_count != clone.hide_ui_before_capture_frame_count ||
             dump_mod_png != clone.dump_mod_png ||
             hide_chat_notification != clone.hide_chat_notification ||
-            auto_fix_quest_result_brightness != clone.auto_fix_quest_result_brightness;
+            auto_fix_quest_result_brightness != clone.auto_fix_quest_result_brightness ||
+            fix_framegen_artifacts != clone.fix_framegen_artifacts ||
+            freeze_game_frames != clone.freeze_game_frames;
     }
 
     bool is_high_quality_photo_mode_enabled() const {

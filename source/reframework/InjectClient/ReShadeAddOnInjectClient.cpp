@@ -141,8 +141,8 @@ bool ReShadeAddOnInjectClient::provide_webp_data(bool is16x9, ProvideFinishedDat
     this->freeze_timescale_frame_left = -1;
 
     auto mod_settings = ModSettings::get_instance();
-    game_ui_controller->hide_for(std::max<int>(HIDE_UI_FRAMES_COUNT_MIN, std::round(
-        static_cast<float>(mod_settings->hide_ui_before_capture_frame_count) / START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS)));
+    game_ui_controller->hide_for(std::max<int>(HIDE_UI_FRAMES_COUNT_MIN, static_cast<int>(std::round(
+        static_cast<float>(mod_settings->hide_ui_before_capture_frame_count) / START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS))));
 
     return true;
 }
@@ -169,24 +169,29 @@ void ReShadeAddOnInjectClient::update() {
     }
 
     auto game_ui_controller = GameUIController::get_instance();
+    auto mod_settings = ModSettings::get_instance();
 
-    if (game_ui_controller == nullptr) {
+    if (game_ui_controller == nullptr || mod_settings == nullptr) {
         return;
     }
 
     if (!request_launched) {
         if (prepare_state == CapturePrepareState::WaitingHideUI) {
             if (game_ui_controller->get_hiding_progress() >= START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS) {
-                prepare_state = CapturePrepareState::FreezeScene;
-                freeze_timescale_frame_left = MIN_FREEZE_TIMESCALE_FRAME_COUNT;
-                freeze_timescale_frame_total = MIN_FREEZE_TIMESCALE_FRAME_COUNT;
+                if (mod_settings->fix_framegen_artifacts) {
+                    prepare_state = CapturePrepareState::FreezeScene;
+                    freeze_timescale_frame_total = std::min<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
+                    freeze_timescale_frame_left = freeze_timescale_frame_total;
+                } else {
+                    prepare_state = CapturePrepareState::Complete;
+                }
             }
         }
 
         if (prepare_state == CapturePrepareState::FreezeScene) {
             auto frame_freezed = freeze_timescale_frame_total - freeze_timescale_frame_left;
 
-            if (frame_freezed >= START_CAPTURE_AFTER_FREEZE_FRAME_COUNT) {
+            if (frame_freezed >= mod_settings->freeze_game_frames - 1) {
                 prepare_state = CapturePrepareState::Complete;
             }
         }
@@ -214,16 +219,12 @@ void ReShadeAddOnInjectClient::late_update() {
 
     if (freeze_timescale_frame_left >= 0) {
         if (!time_scale_cached) {
-            auto current_scene = get_current_scene_method->call<void*>(vm_context, scene_manager);
-            previous_timescale = get_timescale_method->call<float>(vm_context, current_scene);
+            previous_timescale = get_timescale_method->call<float>(vm_context);
 
             time_scale_cached = true;
         }
 
-        auto context = api->get_vm_context();
-        auto current_scene = get_current_scene_method->call<void*>(context, scene_manager);
-        
-        float target_timescale = 0.0f;
+        float target_timescale = 0.0001f;
 
         if (freeze_timescale_frame_left == 0) {
             target_timescale = previous_timescale;
@@ -231,7 +232,7 @@ void ReShadeAddOnInjectClient::late_update() {
         }
 
         api->log_info("Freezing timescale, frame left: %d, total: %d, target frame scale: %f", freeze_timescale_frame_left, freeze_timescale_frame_total, target_timescale);
-        set_timescale_method->call<void>(context, current_scene, target_timescale);
+        set_timescale_method->call<void>(vm_context, target_timescale);
     }
 }
 
@@ -552,13 +553,10 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
         return;
     }
 
-    scene_manager = api->get_native_singleton("via.SceneManager");
-    auto scene_manager_type = tdb->find_type("via.SceneManager");
-    get_current_scene_method = scene_manager_type->find_method("get_CurrentScene");
+    auto application_type = tdb->find_type("via.Application");
 
-    auto scene_type = tdb->find_type("via.Scene");
-    set_timescale_method = scene_type->find_method("set_TimeScale");
-    get_timescale_method = scene_type->find_method("get_TimeScale");
+    set_timescale_method = application_type->find_method("set_GlobalSpeed");
+    get_timescale_method = application_type->find_method("get_GlobalSpeed");
 
     prepare_state = CapturePrepareState::None;
     freeze_timescale_frame_left = -1;
