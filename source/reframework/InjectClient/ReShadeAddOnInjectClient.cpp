@@ -98,9 +98,11 @@ bool ReShadeAddOnInjectClient::end_slowmo_present() {
         slowmo_present = false;
 
         auto &api = reframework::API::get();
-        auto slowmo_module = LoadLibraryA(END_SLOWMO_PLUGIN_NAME);
 
-        if (slowmo_module != nullptr) {
+        HMODULE slowmo_module = nullptr;
+        auto success = GetModuleHandleExA(0, END_SLOWMO_PLUGIN_NAME, &slowmo_module);
+
+        if (success && slowmo_module != nullptr) {
             slowmo_present = true;
             api->log_info("Found end slowmo plugin");
 
@@ -224,6 +226,8 @@ void ReShadeAddOnInjectClient::late_update() {
             time_scale_cached = true;
         }
 
+        // NOTE: Setting timescale completely to 0 will mess up some VFX (black)
+        // Let it have some leeway
         float target_timescale = 0.0001f;
 
         if (freeze_timescale_frame_left == 0) {
@@ -280,9 +284,12 @@ bool ReShadeAddOnInjectClient::try_load_reshade() {
         return true;
     }
 
+    auto& api = reframework::API::get();
+
     if (reshade_module == nullptr) {
-        reshade_module = LoadLibraryA(RESHADE_ADDON_NAME);
-        if (reshade_module == nullptr) {
+        bool success = GetModuleHandleExA(0, RESHADE_ADDON_NAME, &reshade_module);
+        if (!success || reshade_module == nullptr) {
+            api->log_error("Can't detect ReShade plugin, please make sure you have ReShade with Add-On Support installed", RESHADE_ADDON_NAME);
             return false;
         }
     }
@@ -553,6 +560,8 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
         return;
     }
 
+    // NOTE: There is an alternative way of setting the timescale, using via.Scene.set_TimeScale
+    // Though, it a lot of time make the game stutter, I'm not sure why. So this is preferred for now
     auto application_type = tdb->find_type("via.Application");
 
     set_timescale_method = application_type->find_method("set_GlobalSpeed");
