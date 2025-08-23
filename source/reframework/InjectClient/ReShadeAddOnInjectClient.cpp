@@ -182,7 +182,7 @@ void ReShadeAddOnInjectClient::update() {
             if (game_ui_controller->get_hiding_progress() >= START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS) {
                 if (mod_settings->fix_framegen_artifacts) {
                     prepare_state = CapturePrepareState::FreezeScene;
-                    freeze_timescale_frame_total = std::min<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
+                    freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
                     freeze_timescale_frame_left = freeze_timescale_frame_total;
                 } else {
                     prepare_state = CapturePrepareState::Complete;
@@ -193,7 +193,7 @@ void ReShadeAddOnInjectClient::update() {
         if (prepare_state == CapturePrepareState::FreezeScene) {
             auto frame_freezed = freeze_timescale_frame_total - freeze_timescale_frame_left;
 
-            if (frame_freezed >= mod_settings->freeze_game_frames - 1) {
+            if (frame_freezed >= freeze_timescale_frame_total - 1) {
                 prepare_state = CapturePrepareState::Complete;
             }
         }
