@@ -172,6 +172,7 @@ void ReShadeAddOnInjectClient::update() {
 
     auto game_ui_controller = GameUIController::get_instance();
     auto mod_settings = ModSettings::get_instance();
+    auto &api = reframework::API::get();
 
     if (game_ui_controller == nullptr || mod_settings == nullptr) {
         return;
@@ -184,8 +185,16 @@ void ReShadeAddOnInjectClient::update() {
                     prepare_state = CapturePrepareState::FreezeScene;
                     freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
                     freeze_timescale_frame_left = freeze_timescale_frame_total;
+
+#if LOG_DEBUG_STEP
+                    api->log_info("Move to freeze game to fix framegen artifacts");
+#endif
                 } else {
                     prepare_state = CapturePrepareState::Complete;
+
+#if LOG_DEBUG_STEP
+                    api->log_info("No fixing framegen artifacts, move to start screenshotting");
+#endif
                 }
             }
         }
@@ -195,10 +204,17 @@ void ReShadeAddOnInjectClient::update() {
 
             if (frame_freezed >= freeze_timescale_frame_total - 1) {
                 prepare_state = CapturePrepareState::Complete;
+
+#if LOG_DEBUG_STEP
+                api->log_info("Freeze game complete, move to start screenshotting");
+#endif
             }
         }
 
         if (prepare_state == CapturePrepareState::Complete) {
+#if LOG_DEBUG_STEP
+            api->log_info("Starting screenshot process");
+#endif
             // Start the capture process
             launch_capture_implement();
             prepare_state = CapturePrepareState::None;
