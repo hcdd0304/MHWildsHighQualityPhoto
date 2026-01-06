@@ -64,6 +64,7 @@ private:
     reframework::API::Method *get_timescale_method = nullptr;
     float previous_timescale = 1.0f;
     bool time_scale_cached = false;
+    bool should_skip_camera_update = false;
 
     reframework::API::ManagedObject *camera_manager_singleton = nullptr;
     reframework::API::ManagedObject *player_camera_request_obj = nullptr;
@@ -82,10 +83,8 @@ private:
     static void capture_screenshot_callback(int result, int width, int height, void* data);
 
     // Deprecated
-    /* 
     static int pre_player_camera_controller_update_action(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void post_player_camera_controller_update_action(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
-    */
 
     static int pre_open_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static int pre_close_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);

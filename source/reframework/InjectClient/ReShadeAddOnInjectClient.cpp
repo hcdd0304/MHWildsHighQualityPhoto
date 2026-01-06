@@ -154,18 +154,16 @@ void ReShadeAddOnInjectClient::do_prepare_capture() {
 
     freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
     freeze_timescale_frame_left = freeze_timescale_frame_total;
+    should_skip_camera_update = true;
 
     game_ui_controller->hide_for(freeze_timescale_frame_total);
 }
 
-/*
 int ReShadeAddOnInjectClient::pre_player_camera_controller_update_action(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
-    if (!reshade_addon_client_instance->end_slowmo_present()) {
-        auto game_ui_controller = GameUIController::get_instance();
+    auto game_ui_controller = GameUIController::get_instance();
 
-        if (!reshade_addon_client_instance->request_launched && game_ui_controller->is_in_hide()) {
-            return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
-        }
+    if (reshade_addon_client_instance->should_skip_camera_update) {
+        return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
     }
 
     return REFRAMEWORK_HOOK_CALL_ORIGINAL;
@@ -173,7 +171,7 @@ int ReShadeAddOnInjectClient::pre_player_camera_controller_update_action(int arg
 
 void ReShadeAddOnInjectClient::post_player_camera_controller_update_action(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
 
-}*/
+}
 
 void ReShadeAddOnInjectClient::update() {
     if (!is_enabled) {
@@ -691,6 +689,8 @@ void ReShadeAddOnInjectClient::restore_back_hunt_complete_camera_request() {
     api->log_info("Allowing hunt complete to play. Flags: 0x%llX, hunt complete target: 0x%llX",
         player_camera_global_request_flags_backup,
         reinterpret_cast<uintptr_t>(hunt_complete_target_access_key_ptr_backup));
+
+    should_skip_camera_update = false;
 }
 
 int ReShadeAddOnInjectClient::pre_close_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
@@ -715,15 +715,14 @@ int ReShadeAddOnInjectClient::pre_close_quest_result_ui(int argc, void** argv, R
 ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     auto &api = reframework::API::get();
 
-    /*
+    // This is not stable
     auto action_controller_exec_action_method2 = api->tdb()->find_method("app.PlayerCameraController", "updateAction");
     action_controller_exec_action_method2->add_hook(pre_player_camera_controller_update_action,
         post_player_camera_controller_update_action, false);
 
-    auto action_controller_exec_action_method = api->tdb()->find_method("app.PlayerCameraController", "<updateAction>g__exec|182_0(app.PlayerCameraController.ACTION_PART, System.Int32)");
+    auto action_controller_exec_action_method = api->tdb()->find_method("app.PlayerCameraController", "<updateAction>g__exec|195_0(app.PlayerCameraController.ACTION_PART, System.Int32)");
     action_controller_exec_action_method->add_hook(pre_player_camera_controller_update_action,
         post_player_camera_controller_update_action, false);
-    */
 
     auto quest_result_start_method = api->tdb()->find_method("app.GUIFlowQuestResult.cContext", "onStartFlow");
     quest_result_start_method->add_hook(pre_open_quest_result_ui, null_post, false);
@@ -733,6 +732,10 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
 
     auto quest_success_free_playtime_on_enter_state_method = api->tdb()->find_method("app.cQuestSuccessFreePlayTime", "enter");
     quest_success_free_playtime_on_enter_state_method->add_hook(pre_quest_success_free_playtime_on_enter_state_proxy, post_quest_success_free_playtime_on_enter_state_proxy, false);
+
+    // This is for quest failure
+    auto hunt_repel_on_enter_state_method = api->tdb()->find_method("app.fsm_action.StEmCameraRepel", "doAction");
+    hunt_repel_on_enter_state_method->add_hook(pre_quest_success_free_playtime_on_enter_state_proxy, post_quest_success_free_playtime_on_enter_state_proxy, false);
 
     if (!try_load_reshade()) {
         api->log_error("Failed to load ReShade module");
@@ -753,6 +756,7 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
 
     prepare_state = CapturePrepareState::None;
     freeze_timescale_frame_left = -1;
+    should_skip_camera_update = false;
 }
 
 ReShadeAddOnInjectClient::~ReShadeAddOnInjectClient() {
