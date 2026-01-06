@@ -24,8 +24,8 @@ public:
 private:
     enum class CapturePrepareState {
         None,
-        WaitingHideUI,
         FreezeScene,
+        WaitingHideUI,
         Complete
     };
 
@@ -49,8 +49,11 @@ private:
     bool is_photo_mode = false;
 
     bool request_launched = false;
+    // Deprecated
+    /*
     bool slowmo_present = false;
     bool slowmo_present_cached = false;
+    */
     bool is_requested = false;
 
     CapturePrepareState prepare_state = CapturePrepareState::None;
@@ -62,23 +65,42 @@ private:
     float previous_timescale = 1.0f;
     bool time_scale_cached = false;
 
+    reframework::API::ManagedObject *camera_manager_singleton = nullptr;
+    reframework::API::ManagedObject *player_camera_request_obj = nullptr;
+    reframework::API::ManagedObject *hunt_complete_target_access_key_ptr_backup = nullptr;
+    std::uint64_t player_camera_global_request_flags_backup = 0;
+
 private:
     bool try_load_reshade();
+    // Deprecated
+    /*
     bool end_slowmo_present();
+    */
     void finish_capture(bool success, std::vector<std::uint8_t>* provided_data = nullptr);
 
     static void compress_webp_thread(std::uint8_t *data, int width, int height);
     static void capture_screenshot_callback(int result, int width, int height, void* data);
 
+    // Deprecated
+    /* 
     static int pre_player_camera_controller_update_action(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void post_player_camera_controller_update_action(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+    */
 
     static int pre_open_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static int pre_close_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void null_post(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
 
+    int pre_quest_success_free_playtime_on_enter_state(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
+    void post_quest_success_free_playtime_on_enter_state(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+
+    static int pre_quest_success_free_playtime_on_enter_state_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
+    static void post_quest_success_free_playtime_on_enter_state_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+
     bool should_reshade_filters_disable_when_show_quest_result_ui() const;
     void launch_capture_implement();
+    void restore_back_hunt_complete_camera_request();
+    void do_prepare_capture();
 
 public:
     ~ReShadeAddOnInjectClient();

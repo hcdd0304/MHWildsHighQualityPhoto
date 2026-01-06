@@ -61,7 +61,7 @@ std::unique_ptr<ReShadeAddOnInjectClient> reshade_addon_client_instance = nullpt
 std::unique_ptr<avir_scale_thread_pool> avir_thread_pool_instance = nullptr;
 
 static const char *RESHADE_ADDON_NAME = "MHWildsHighQualityPhoto_Reshade.addon";
-static const char *END_SLOWMO_PLUGIN_NAME = "end_slowmo.dll";
+//static const char *END_SLOWMO_PLUGIN_NAME = "end_slowmo.dll";
 static const char *GET_SCREEN_CAPTURE_SYMBOL_NAME = "request_screen_capture";
 static const char *SET_RESHADE_FILTERS_ENABLE = "set_reshade_filters_enable";
 
@@ -92,6 +92,7 @@ void ReShadeAddOnInjectClient::initialize() {
     }
 }
 
+/*
 bool ReShadeAddOnInjectClient::end_slowmo_present() {
     if (!slowmo_present_cached) {
         slowmo_present_cached = true;
@@ -112,7 +113,7 @@ bool ReShadeAddOnInjectClient::end_slowmo_present() {
         }
     }
     return false;
-}
+}*/
 
 bool ReShadeAddOnInjectClient::provide_webp_data(bool is16x9, ProvideFinishedDataCallback provide_data_finish_callback) {
     if (!is_enabled) {
@@ -139,16 +140,25 @@ bool ReShadeAddOnInjectClient::provide_webp_data(bool is16x9, ProvideFinishedDat
     this->provide_data_finish_callback = provide_data_finish_callback;
     this->is_16x9 = is16x9;
     this->request_launched = false;
-    this->prepare_state = CapturePrepareState::WaitingHideUI;
-    this->freeze_timescale_frame_left = -1;
 
-    auto mod_settings = ModSettings::get_instance();
-    game_ui_controller->hide_for(std::max<int>(HIDE_UI_FRAMES_COUNT_MIN, static_cast<int>(std::round(
-        static_cast<float>(mod_settings->hide_ui_before_capture_frame_count) / START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS))));
+    do_prepare_capture();
 
     return true;
 }
 
+void ReShadeAddOnInjectClient::do_prepare_capture() {
+    auto mod_settings = ModSettings::get_instance();
+    auto game_ui_controller = GameUIController::get_instance();
+
+    this->prepare_state = CapturePrepareState::FreezeScene;
+
+    freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
+    freeze_timescale_frame_left = freeze_timescale_frame_total;
+
+    game_ui_controller->hide_for(freeze_timescale_frame_total);
+}
+
+/*
 int ReShadeAddOnInjectClient::pre_player_camera_controller_update_action(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
     if (!reshade_addon_client_instance->end_slowmo_present()) {
         auto game_ui_controller = GameUIController::get_instance();
@@ -163,7 +173,7 @@ int ReShadeAddOnInjectClient::pre_player_camera_controller_update_action(int arg
 
 void ReShadeAddOnInjectClient::post_player_camera_controller_update_action(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
 
-}
+}*/
 
 void ReShadeAddOnInjectClient::update() {
     if (!is_enabled) {
@@ -179,35 +189,26 @@ void ReShadeAddOnInjectClient::update() {
     }
 
     if (!request_launched) {
-        if (prepare_state == CapturePrepareState::WaitingHideUI) {
-            if (game_ui_controller->get_hiding_progress() >= START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS) {
-                if (mod_settings->fix_framegen_artifacts) {
-                    prepare_state = CapturePrepareState::FreezeScene;
-                    freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
-                    freeze_timescale_frame_left = freeze_timescale_frame_total;
-
-#if LOG_DEBUG_STEP
-                    api->log_info("Move to freeze game to fix framegen artifacts");
-#endif
-                } else {
-                    prepare_state = CapturePrepareState::Complete;
-
-#if LOG_DEBUG_STEP
-                    api->log_info("No fixing framegen artifacts, move to start screenshotting");
-#endif
-                }
-            }
-        }
-
         if (prepare_state == CapturePrepareState::FreezeScene) {
             auto frame_freezed = freeze_timescale_frame_total - freeze_timescale_frame_left;
 
             if (frame_freezed >= freeze_timescale_frame_total - 1) {
-                prepare_state = CapturePrepareState::Complete;
+                prepare_state = CapturePrepareState::WaitingHideUI;
 
 #if LOG_DEBUG_STEP
                 api->log_info("Freeze game complete, move to start screenshotting");
 #endif
+            }
+            else {
+                api->log_info("Still waiting for timescale freeze");
+            }
+        }
+
+        if (prepare_state == CapturePrepareState::WaitingHideUI) {
+            float hide_progress = game_ui_controller->get_hiding_progress();
+
+            if (hide_progress >= START_CAPTURE_AFTER_HIDE_REACHED_PROGRESS) {
+                prepare_state = CapturePrepareState::Complete;
             }
         }
 
@@ -244,7 +245,7 @@ void ReShadeAddOnInjectClient::late_update() {
 
         // NOTE: Setting timescale completely to 0 will mess up some VFX (black)
         // Let it have some leeway
-        float target_timescale = 0.0001f;
+        float target_timescale = 0.000001f;
 
         if (freeze_timescale_frame_left == 0) {
             target_timescale = previous_timescale;
@@ -263,6 +264,10 @@ void ReShadeAddOnInjectClient::end_rendering() {
 
     if (freeze_timescale_frame_left >= 0) {
         freeze_timescale_frame_left--;
+
+        auto& api = reframework::API::get();
+
+        api->log_info("End rendering, timescale freeze frame left: %d", freeze_timescale_frame_left);
     }
 }
 
@@ -490,6 +495,9 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
         api->log_info("Screen capture failed with error code: %d", result);
         reshade_addon_client_instance->finish_capture(false);
     }
+
+    // Done with the screenshot, restore back the camera request
+    reshade_addon_client_instance->restore_back_hunt_complete_camera_request();
 }
 
 void ReShadeAddOnInjectClient::finish_capture(bool success, std::vector<std::uint8_t>* provided_data) {
@@ -530,6 +538,161 @@ int ReShadeAddOnInjectClient::pre_open_quest_result_ui(int argc, void** argv, RE
     return REFRAMEWORK_HOOK_CALL_ORIGINAL;
 }
 
+int ReShadeAddOnInjectClient::pre_quest_success_free_playtime_on_enter_state(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    if (!is_enabled) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    auto &api = reframework::API::get();
+    auto vm_context = api->get_vm_context();
+
+    if (camera_manager_singleton == nullptr) {
+        camera_manager_singleton = api->get_managed_singleton("app.CameraManager");
+    }
+
+    if (camera_manager_singleton == nullptr) {
+        api->log_error("Can't find CameraManager singleton!");
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    auto player_camera_request_obj_ptr = camera_manager_singleton->get_field<reframework::API::ManagedObject*>("_PlCameraRequest");
+
+    if (player_camera_request_obj_ptr == nullptr) {
+        api->log_error("Can't find CameraManager's player camera request!");
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    player_camera_request_obj = *player_camera_request_obj_ptr;
+
+    if (player_camera_request_obj == nullptr) {
+        api->log_error("Player camera request object is null!");
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    // Backup current request flags
+    auto flags_ptr = player_camera_request_obj->get_field<std::uint64_t>("_Flags");
+    if (flags_ptr == nullptr) {
+        api->log_error("Can't find Player camera request object's flags!");
+    
+        // Rollback
+        player_camera_request_obj = nullptr;
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    player_camera_global_request_flags_backup = *flags_ptr;
+
+    auto hunt_complete_target_obj_ptr = player_camera_request_obj->get_field<reframework::API::ManagedObject*>("_HuntComplete");
+    if (hunt_complete_target_obj_ptr == nullptr) {
+        api->log_error("Can't find Player camera request object's hunt complete target!");
+    
+        // Rollback
+        player_camera_request_obj = nullptr;
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    hunt_complete_target_access_key_ptr_backup = *hunt_complete_target_obj_ptr;
+
+    // Log it out that we have successfully backed up
+    api->log_info("Backed up Player camera request object's flags: 0x%llX, hunt complete target: 0x%llX. Preparing to disable hunt complete.",
+        player_camera_global_request_flags_backup,
+        reinterpret_cast<uintptr_t>(hunt_complete_target_access_key_ptr_backup));
+
+    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+}
+
+int ReShadeAddOnInjectClient::pre_quest_success_free_playtime_on_enter_state_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    if (!reshade_addon_client_instance->is_enabled) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    return reshade_addon_client_instance->pre_quest_success_free_playtime_on_enter_state(argc, argv, arg_tys, ret_addr);
+}
+
+void ReShadeAddOnInjectClient::post_quest_success_free_playtime_on_enter_state(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {    
+    auto &api = reframework::API::get();
+
+    if (player_camera_request_obj == nullptr) {
+        api->log_error("Player camera request object is null during post quest success!");
+        return;
+    }
+
+    // In this function, we want to roll back the camera request to the backed up state
+    // But at the same time, back up the current state where it has been modified to focus the camera on the monster, so later when we done all our shenanigans, we can restore it back
+    auto current_flags_ptr = player_camera_request_obj->get_field<std::uint64_t>("_Flags");
+    if (current_flags_ptr == nullptr) {
+        api->log_error("Can't find Player camera request object's flags during post quest success!");
+        return;
+    }
+
+    auto current_flags = *current_flags_ptr;
+
+    auto hunt_complete_target_obj_ptr = player_camera_request_obj->get_field<reframework::API::ManagedObject*>("_HuntComplete");
+    if (hunt_complete_target_obj_ptr == nullptr) {
+        api->log_error("Can't find Player camera request object's hunt complete target during post quest success!");
+        return;
+    }
+
+    auto current_hunt_complete_target = *hunt_complete_target_obj_ptr;
+
+    auto old_flags = player_camera_global_request_flags_backup;
+    auto old_hunt_complete_target = hunt_complete_target_access_key_ptr_backup;
+
+    // Restore to backed up state
+    *current_flags_ptr = old_flags;
+    *hunt_complete_target_obj_ptr = old_hunt_complete_target;
+
+    // Back up the current state again
+    player_camera_global_request_flags_backup = current_flags;
+    hunt_complete_target_access_key_ptr_backup = current_hunt_complete_target;
+
+    api->log_info("Roll back camera request to disable hunt complete. Flags: 0x%llX, hunt complete target: 0x%llX",
+        *current_flags_ptr,
+        reinterpret_cast<uintptr_t>(*hunt_complete_target_obj_ptr));
+
+    // Log backup
+    api->log_info("Backed up Player camera request object's flags: 0x%llX, hunt complete target: 0x%llX",
+        current_flags,
+        reinterpret_cast<uintptr_t>(current_hunt_complete_target));
+}
+
+void ReShadeAddOnInjectClient::post_quest_success_free_playtime_on_enter_state_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
+    if (!reshade_addon_client_instance->is_enabled) {
+        return;
+    }
+
+    reshade_addon_client_instance->post_quest_success_free_playtime_on_enter_state(ret_val, ret_ty, ret_addr);
+}
+
+void ReShadeAddOnInjectClient::restore_back_hunt_complete_camera_request() {
+    auto &api = reframework::API::get();
+
+    if (player_camera_request_obj == nullptr) {
+        api->log_error("Player camera request object is null during restore back!");
+        return;
+    }
+
+    auto hunt_complete_target_obj_ptr = player_camera_request_obj->get_field<reframework::API::ManagedObject*>("_HuntComplete");
+    if (hunt_complete_target_obj_ptr == nullptr) {
+        api->log_error("Can't find Player camera request object's hunt complete target during restore back!");
+        return;
+    }
+
+    *hunt_complete_target_obj_ptr = hunt_complete_target_access_key_ptr_backup;
+
+    // Restore the flags too
+    auto flags_ptr = player_camera_request_obj->get_field<std::uint64_t>("_Flags");
+    if (flags_ptr == nullptr) {
+        api->log_error("Can't find Player camera request object's flags during restore back!");
+        return;
+    }
+
+    *flags_ptr = player_camera_global_request_flags_backup;
+
+    api->log_info("Allowing hunt complete to play. Flags: 0x%llX, hunt complete target: 0x%llX",
+        player_camera_global_request_flags_backup,
+        reinterpret_cast<uintptr_t>(hunt_complete_target_access_key_ptr_backup));
+}
+
 int ReShadeAddOnInjectClient::pre_close_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
     if (!reshade_addon_client_instance->is_enabled) {
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
@@ -552,6 +715,7 @@ int ReShadeAddOnInjectClient::pre_close_quest_result_ui(int argc, void** argv, R
 ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     auto &api = reframework::API::get();
 
+    /*
     auto action_controller_exec_action_method2 = api->tdb()->find_method("app.PlayerCameraController", "updateAction");
     action_controller_exec_action_method2->add_hook(pre_player_camera_controller_update_action,
         post_player_camera_controller_update_action, false);
@@ -559,12 +723,16 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     auto action_controller_exec_action_method = api->tdb()->find_method("app.PlayerCameraController", "<updateAction>g__exec|182_0(app.PlayerCameraController.ACTION_PART, System.Int32)");
     action_controller_exec_action_method->add_hook(pre_player_camera_controller_update_action,
         post_player_camera_controller_update_action, false);
+    */
 
     auto quest_result_start_method = api->tdb()->find_method("app.GUIFlowQuestResult.cContext", "onStartFlow");
     quest_result_start_method->add_hook(pre_open_quest_result_ui, null_post, false);
 
     auto quest_result_end_method = api->tdb()->find_method("app.GUIFlowQuestResult.cContext", "onEndFlow");
     quest_result_end_method->add_hook(pre_close_quest_result_ui, null_post, false);
+
+    auto quest_success_free_playtime_on_enter_state_method = api->tdb()->find_method("app.cQuestSuccessFreePlayTime", "enter");
+    quest_success_free_playtime_on_enter_state_method->add_hook(pre_quest_success_free_playtime_on_enter_state_proxy, post_quest_success_free_playtime_on_enter_state_proxy, false);
 
     if (!try_load_reshade()) {
         api->log_error("Failed to load ReShade module");

@@ -89,6 +89,7 @@ public:
 
     void hide_for(int frame_count);
     void update();
+    void end_rendering();
 
     float get_hiding_progress() const;
 

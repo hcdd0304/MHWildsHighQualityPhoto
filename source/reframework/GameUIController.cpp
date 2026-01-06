@@ -135,8 +135,6 @@ void GameUIController::initialize(const REFrameworkPluginInitializeParam *initia
 void GameUIController::update() {
     if (is_in_hide()) {
         if (!is_hiding_until_notice()) {
-            hide_frames_passed++;
-        
             if (hide_frames_passed > total_hide_frame) {
                 show_impl();
             }
@@ -301,5 +299,13 @@ void GameUIController::set_is_in_quest_result(bool should) {
         api->log_info("Exit quest result, restoring previous brightness settings");
 
         restore_necessary_display_settings();
+    }
+}
+
+void GameUIController::end_rendering() {
+    if (is_in_hide()) {
+        if (!is_hiding_until_notice()) {
+            hide_frames_passed++;
+        }
     }
 }
