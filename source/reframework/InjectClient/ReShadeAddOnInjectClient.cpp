@@ -716,13 +716,21 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     auto &api = reframework::API::get();
 
     // This is not stable
-    auto action_controller_exec_action_method2 = api->tdb()->find_method("app.PlayerCameraController", "updateAction");
-    action_controller_exec_action_method2->add_hook(pre_player_camera_controller_update_action,
-        post_player_camera_controller_update_action, false);
+    auto player_camera_controller_type = api->tdb()->find_type("app.PlayerCameraController");
+    if (player_camera_controller_type == nullptr) {
+        api->log_error("Can't find PlayerCameraController type!");
+        return;
+    }
 
-    auto action_controller_exec_action_method = api->tdb()->find_method("app.PlayerCameraController", "<updateAction>g__exec|195_0(app.PlayerCameraController.ACTION_PART, System.Int32)");
-    action_controller_exec_action_method->add_hook(pre_player_camera_controller_update_action,
-        post_player_camera_controller_update_action, false);
+    // Iterate all methods and hook method that starts with updateAction
+    auto player_camera_controller_methods = player_camera_controller_type->get_methods();
+    for (auto& method : player_camera_controller_methods) {
+        auto method_name = std::string_view(method->get_name());
+
+        if (method_name.starts_with("updateAction") || method_name.starts_with("<updateAction>")) {
+            method->add_hook(pre_player_camera_controller_update_action, post_player_camera_controller_update_action, false);
+        }
+    }
 
     auto quest_result_start_method = api->tdb()->find_method("app.GUIFlowQuestResult.cContext", "onStartFlow");
     quest_result_start_method->add_hook(pre_open_quest_result_ui, null_post, false);
