@@ -42,6 +42,7 @@ target_include_directories(subprocess_h INTERFACE "subprocess.h")
 
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE "stb")
+target_include_directories(stb INTERFACE "stb_image")
 
 add_subdirectory(glaze)
 add_subdirectory(nativefiledialog-extended)
