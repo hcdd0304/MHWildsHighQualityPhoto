@@ -60,6 +60,8 @@ private:
 std::unique_ptr<ReShadeAddOnInjectClient> reshade_addon_client_instance = nullptr;
 std::unique_ptr<avir_scale_thread_pool> avir_thread_pool_instance = nullptr;
 
+BS::thread_pool<> random_task_thread_pool(4);
+
 static const char *RESHADE_ADDON_NAME = "MHWildsHighQualityPhoto_Reshade.addon";
 //static const char *END_SLOWMO_PLUGIN_NAME = "end_slowmo.dll";
 static const char *GET_SCREEN_CAPTURE_SYMBOL_NAME = "request_screen_capture";
@@ -340,7 +342,6 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
 #endif
 
     std::vector<std::uint8_t> new_buffer_if_have;
-    bool need_delete_data = true;
 
     int force_size_width = FORCE_SIZE_WIDTH_16x9;
     int force_size_height = FORCE_SIZE_HEIGHT_16x9;
@@ -377,8 +378,6 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
         data = new_buffer_if_have.data();
         width = force_size_width;
         height = force_size_height;
-
-        need_delete_data = false;
     }
     
     bool is_lossless = reshade_addon_client_instance->is_lossless();
@@ -413,10 +412,6 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
                 break;
             }
         } while (current_quality >= min_quality);
-    }
-
-    if (need_delete_data) {
-        delete[] data;
     }
 
     if (result_size > 0) {
@@ -455,39 +450,49 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
             return;
         }
 
-        std::uint8_t* data_copy = new std::uint8_t[width * height * 4];
-        std::memcpy(data_copy, data, width * height * 4);
-
-        // Clear alpha channels
-        for (int i = 0; i < width * height; ++i) {
-            data_copy[i * 4 + 3] = 0xFF; // Set alpha channel to 255 (opaque)
+        if (reshade_addon_client_instance->dump_promise.valid()) {
+            reshade_addon_client_instance->dump_promise.wait();
         }
 
-        if (reshade_addon_client_instance->webp_compress_thread != nullptr) {
-            reshade_addon_client_instance->webp_compress_thread->join();
-            reshade_addon_client_instance->webp_compress_thread.reset();
+        if (reshade_addon_client_instance->webp_promise.valid()) {
+            reshade_addon_client_instance->webp_promise.wait();
         }
 
-        if (mod_settings->dump_mod_png) {
-            auto persistent_dir = REFramework::get_persistent_dir();
+        auto &data_cache = reshade_addon_client_instance->screenshot_data_cache;
+        auto size_buffer_needed = static_cast<std::size_t>(width * height * 4);
 
-            static constexpr const char *DEBUG_FILE_NAME= "reframework/data/MHWilds_HighQualityPhotoMod_HighQuality_QuestResult.png";
-
-            if (!std::filesystem::exists(persistent_dir)) {
-                std::filesystem::create_directories(persistent_dir);
-            }
-
-            auto debug_path = persistent_dir / DEBUG_FILE_NAME;
-            auto debug_path_str = debug_path.string();
-
-            stbi_write_png(debug_path_str.c_str(), width, height, 4, data_copy, width * 4);
+        if (data_cache.size() < size_buffer_needed) {
+            data_cache.resize(size_buffer_needed);
         }
+
+        std::memcpy(data_cache.data(), data, size_buffer_needed);
+
+        auto data_ptr = data_cache.data();
 
 #ifdef LOG_DEBUG_STEP
         api->log_info("Calling WebP compress thread");
 #endif
 
-        reshade_addon_client_instance->webp_compress_thread = std::make_unique<std::thread>(compress_webp_thread, data_copy, width, height);
+        reshade_addon_client_instance->dump_promise = random_task_thread_pool.submit_task([data_ptr, width, height, dump_debug_png = mod_settings->dump_mod_png]() {
+            if (dump_debug_png) {
+                auto persistent_dir = REFramework::get_persistent_dir();
+
+                static constexpr const char *DEBUG_FILE_NAME= "reframework/data/MHWilds_HighQualityPhotoMod_HighQuality_QuestResult.png";
+
+                if (!std::filesystem::exists(persistent_dir)) {
+                    std::filesystem::create_directories(persistent_dir);
+                }
+
+                auto debug_path = persistent_dir / DEBUG_FILE_NAME;
+                auto debug_path_str = debug_path.string();
+
+                stbi_write_png(debug_path_str.c_str(), width, height, 4, data_ptr, width * 4);
+            }
+        });
+
+        reshade_addon_client_instance->webp_promise = random_task_thread_pool.submit_task([data_ptr, width, height, dump_debug_png = mod_settings->dump_mod_png]() {
+            ReShadeAddOnInjectClient::compress_webp_thread(data_ptr, width, height);
+        });
     } else {
         // Handle error
         api->log_info("Screen capture failed with error code: %d", result);
@@ -773,8 +778,11 @@ ReShadeAddOnInjectClient::~ReShadeAddOnInjectClient() {
         reshade_module = nullptr;
     }
 
-    if (webp_compress_thread != nullptr) {
-        webp_compress_thread->join();
-        webp_compress_thread.reset();
+    if (webp_promise.valid()) {
+        webp_promise.wait();
+    }
+
+    if (dump_promise.valid()) {
+        dump_promise.wait();
     }
 }

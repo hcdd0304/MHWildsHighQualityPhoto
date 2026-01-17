@@ -16,6 +16,10 @@ enum SaveCaptureState {
     SAVECAPTURESTATE_AFTER_SAVE = 10,
 };
 
+enum LoadCaptureState {
+    LOADCAPTURESTATE_DESERIALIZE = 4
+};
+
 // See via.render.SerializedResult.get_Content
 const std::size_t SerializeResultContentArrayOffset = 0x90;
 const std::size_t MaxSerializePhotoSize = 0xF0000;

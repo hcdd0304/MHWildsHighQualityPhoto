@@ -12,7 +12,9 @@
 
 #include <atomic>
 #include <memory>
+#include <future>
 #include <thread>
+#include <vector>
 
 #include <Windows.h>
 
@@ -39,7 +41,9 @@ private:
     request_screen_capture_func request_reshade_screen_capture = nullptr;
     set_reshade_filters_enable_func set_reshade_filters_enable = nullptr;
 
-    std::unique_ptr<std::thread> webp_compress_thread = nullptr;
+    std::future<void> webp_promise;
+    std::future<void> dump_promise;
+
     QuestResultHQBackgroundMode quest_result_hq_background_mode = QuestResultHQBackgroundMode::ReshadeApplyLater;
 
     bool is_enabled = true;
@@ -70,6 +74,7 @@ private:
     reframework::API::ManagedObject *player_camera_request_obj = nullptr;
     reframework::API::ManagedObject *hunt_complete_target_access_key_ptr_backup = nullptr;
     std::uint64_t player_camera_global_request_flags_backup = 0;
+    std::vector<std::uint8_t> screenshot_data_cache;
 
 private:
     bool try_load_reshade();
