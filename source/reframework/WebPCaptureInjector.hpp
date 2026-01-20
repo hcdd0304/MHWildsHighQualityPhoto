@@ -11,10 +11,14 @@ private:
     WebPCaptureInjectClient *client = nullptr;
     reframework::API *api = nullptr;
     reframework::API::ManagedObject *album_manager = nullptr;
+    reframework::API::ManagedObject *always_valid_array = nullptr;
+    reframework::API::ManagedObject *original_webp_array = nullptr;
 
     reframework::API::Method *get_serialized_field_content_method = nullptr;
-    reframework::API::Method *set_array_byte_method = nullptr;
+    reframework::API::Method *get_serialized_field_completed_method = nullptr;
+    reframework::API::Method *get_serialized_field_valid_method = nullptr;
     reframework::API::TypeDefinition *byte_type = nullptr;
+    reframework::API::Method *update_save_capture_method = nullptr;
 
     // Hook states
 
@@ -24,6 +28,7 @@ private:
     bool is_requesting_photo_save = false;
     bool request_processed = false;
     bool inject_pending = false;
+    bool spoofed_result = false;
 
     reframework::API::ManagedObject *csave_obj = nullptr;
 
@@ -72,6 +77,8 @@ private:
     void hook_to_extend_webp_max_size();
 
 public:
+    ~WebPCaptureInjector();
+
     static WebPCaptureInjector *get_instance();
     static void initialize(reframework::API *api_instance);
 

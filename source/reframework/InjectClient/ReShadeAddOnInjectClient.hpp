@@ -66,6 +66,8 @@ private:
 
     reframework::API::Method *set_timescale_method = nullptr;
     reframework::API::Method *get_timescale_method = nullptr;
+    reframework::API::Method *update_save_capture_method = nullptr;
+
     float previous_timescale = 1.0f;
     bool time_scale_cached = false;
     bool should_skip_camera_update = false;
@@ -73,8 +75,13 @@ private:
     reframework::API::ManagedObject *camera_manager_singleton = nullptr;
     reframework::API::ManagedObject *player_camera_request_obj = nullptr;
     reframework::API::ManagedObject *hunt_complete_target_access_key_ptr_backup = nullptr;
+    reframework::API::ManagedObject *player_camera_request_obj_backup = nullptr;
+    reframework::API::ManagedObject *album_manager_instance = nullptr;
+
     std::uint64_t player_camera_global_request_flags_backup = 0;
     std::vector<std::uint8_t> screenshot_data_cache;
+
+    bool done_capture = false;
 
 private:
     bool try_load_reshade();
@@ -100,11 +107,13 @@ private:
 
     static int pre_quest_success_free_playtime_on_enter_state_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void post_quest_success_free_playtime_on_enter_state_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+    static int pre_quest_result_load_quest_result_photograph(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
 
     bool should_reshade_filters_disable_when_show_quest_result_ui() const;
     void launch_capture_implement();
     void restore_back_hunt_complete_camera_request();
     void do_prepare_capture();
+    void manual_update_save_capture_until_complete();
 
 public:
     ~ReShadeAddOnInjectClient();

@@ -73,6 +73,10 @@ struct ModSettings {
 
     int freeze_game_frames = 5;
 
+    bool debug_capture_delay = false;
+
+    float simulate_capture_delay_seconds = 17.0f;
+
     bool data_changed(const ModSettings &clone) {
         return enable_override_album_image != clone.enable_override_album_image ||
             override_album_image_path != clone.override_album_image_path ||
@@ -95,7 +99,9 @@ struct ModSettings {
             hide_chat_notification != clone.hide_chat_notification ||
             auto_fix_quest_result_brightness != clone.auto_fix_quest_result_brightness ||
             fix_framegen_artifacts != clone.fix_framegen_artifacts ||
-            freeze_game_frames != clone.freeze_game_frames;
+            freeze_game_frames != clone.freeze_game_frames ||
+            simulate_capture_delay_seconds != clone.simulate_capture_delay_seconds ||
+            debug_capture_delay != clone.debug_capture_delay;
     }
 
     bool is_high_quality_photo_mode_enabled() const {

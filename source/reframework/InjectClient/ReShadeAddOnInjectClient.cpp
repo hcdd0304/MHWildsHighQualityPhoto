@@ -132,6 +132,7 @@ bool ReShadeAddOnInjectClient::provide_webp_data(bool is16x9, ProvideFinishedDat
     }
 
     is_requested = false;
+    done_capture = false;
 
     auto game_ui_controller = GameUIController::get_instance();
     if (game_ui_controller == nullptr) {
@@ -414,6 +415,12 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
         } while (current_quality >= min_quality);
     }
 
+    auto mod_settings = ModSettings::get_instance();
+    if (mod_settings->debug_capture_delay) {
+        api->log_info("Debug capture delay enabled, simulating delay of %f seconds", mod_settings->simulate_capture_delay_seconds);
+        std::this_thread::sleep_for(std::chrono::duration<float>(mod_settings->simulate_capture_delay_seconds));
+    }
+
     if (result_size > 0) {
         std::vector<std::uint8_t> temp_buffer(result_temp, result_temp + result_size);
         api->log_info("Screenshot image encoded successfully, size: %zu bytes", result_size);
@@ -432,6 +439,8 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
         api->log_info("Failed to encode image data to WebP format.");
         reshade_addon_client_instance->finish_capture(false);
     }
+
+    reshade_addon_client_instance->done_capture = true;
 }
 
 void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width, int height, void* data) {
@@ -717,6 +726,72 @@ int ReShadeAddOnInjectClient::pre_close_quest_result_ui(int argc, void** argv, R
     return REFRAMEWORK_HOOK_CALL_ORIGINAL;
 }
 
+int ReShadeAddOnInjectClient::pre_quest_result_load_quest_result_photograph(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    if (!reshade_addon_client_instance->is_enabled) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    auto &api = reframework::API::get();
+
+    // Do dirty
+    if (!reshade_addon_client_instance->done_capture) {
+        api->log_info("Waiting for screenshot capture to complete before loading quest result photograph...");
+
+        while (!reshade_addon_client_instance->done_capture) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+
+        reshade_addon_client_instance->manual_update_save_capture_until_complete();
+
+        api->log_info("Screenshot capture completed, proceeding to load quest result photograph.");
+    }
+
+    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+}
+
+void ReShadeAddOnInjectClient::manual_update_save_capture_until_complete() {
+    auto &api = reframework::API::get();
+
+    if (!album_manager_instance) {
+        album_manager_instance = api->get_managed_singleton("app.AlbumManager");
+    }
+
+    if (!album_manager_instance) {
+        api->log_info("Album manager is null to manually update save capture");
+        return;
+    }
+
+    const int MAX_TRY_COUNT = 1000;
+
+    int try_count = MAX_TRY_COUNT;
+    auto vm_context = api->get_vm_context();
+
+    while (try_count-- > 0) {
+        auto capture_state_ptr = album_manager_instance->get_field<int>("_SaveCaptureState");
+
+        if (capture_state_ptr == nullptr) {
+            api->log_info("Capture state is null to manually update save capture");
+            return;
+        }
+
+        SaveCaptureState capture_state = static_cast<SaveCaptureState>(*capture_state_ptr);
+
+        // We are finished
+        if (capture_state == SAVECAPTURESTATE_IDLE || capture_state >= SAVECAPTURESTATE_WAIT_SAVE_CAPTURE) {
+            api->log_info("Manual update save capture finished");
+            return;
+        } else {
+            auto msg = "Manual update save capture in progress, current state: " + std::to_string(static_cast<int>(capture_state));
+            api->log_info(msg.c_str());
+        }
+
+        update_save_capture_method->call<void>(vm_context, album_manager_instance);
+    }
+
+    api->log_info("Manual update save capture reached max try count, basically failed");
+    return;
+}
+
 ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     auto &api = reframework::API::get();
 
@@ -750,6 +825,11 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     auto hunt_repel_on_enter_state_method = api->tdb()->find_method("app.fsm_action.StEmCameraRepel", "doAction");
     hunt_repel_on_enter_state_method->add_hook(pre_quest_success_free_playtime_on_enter_state_proxy, post_quest_success_free_playtime_on_enter_state_proxy, false);
 
+    auto load_quest_result_photograph_method = api->tdb()->find_method("app.AlbumManager", "loadQuestResultPhoto");
+    load_quest_result_photograph_method->add_hook(pre_quest_result_load_quest_result_photograph, null_post, false);
+
+    update_save_capture_method = api->tdb()->find_method("app.AlbumManager", "updateSaveCapture");
+
     if (!try_load_reshade()) {
         api->log_error("Failed to load ReShade module");
     }
@@ -770,6 +850,7 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     prepare_state = CapturePrepareState::None;
     freeze_timescale_frame_left = -1;
     should_skip_camera_update = false;
+    done_capture = true;
 }
 
 ReShadeAddOnInjectClient::~ReShadeAddOnInjectClient() {

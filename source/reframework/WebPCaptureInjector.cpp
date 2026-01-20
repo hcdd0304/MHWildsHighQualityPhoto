@@ -9,6 +9,24 @@
 
 std::unique_ptr<WebPCaptureInjector> webp_capture_injector_instance = nullptr;
 
+template <typename T>
+T *get_array_ptr(reframework::API::ManagedObject *array_obj) {
+    if (!array_obj) {
+        return nullptr;
+    }
+
+    return reinterpret_cast<T*>(reinterpret_cast<std::uint8_t*>(array_obj) + ArrayPtrOffset);
+}
+
+void set_serialize_result_array(reframework::API::ManagedObject *serialized_result, reframework::API::ManagedObject *new_array) {
+    if (!serialized_result || !new_array) {
+        return;
+    }
+
+    *reinterpret_cast<reframework::API::ManagedObject**>(
+        reinterpret_cast<std::uint8_t*>(serialized_result) + SerializeResultContentArrayOffset) = new_array;
+}
+
 int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
     if (!webp_capture_injector_instance) {
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
@@ -20,14 +38,43 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
-    auto capture_state_ptr = album_manager->get_field<int>("_SaveCaptureState");
     auto api = webp_capture_injector_instance->api;
+
+    auto capture_state_ptr = album_manager->get_field<int>("_SaveCaptureState");
 
     if (capture_state_ptr != nullptr) {
         SaveCaptureState capture_state = static_cast<SaveCaptureState>(*capture_state_ptr);
 
         if (webp_capture_injector_instance->has_request_capture) {
-            if (capture_state == SAVECAPTURESTATE_WAIT_SERIALIZE && !webp_capture_injector_instance->is_capture_done) {
+            if (capture_state == SAVECAPTURESTATE_WAIT_SERIALIZE) {
+                auto serialized_result_ptr = album_manager->get_field<reframework::API::ManagedObject*>("_SerializedResult");
+                if (serialized_result_ptr && *serialized_result_ptr && !webp_capture_injector_instance->spoofed_result) {
+                    auto serialized_result = serialized_result_ptr;
+                    auto is_completed = webp_capture_injector_instance->get_serialized_field_completed_method->call<bool>(
+                        api->get_vm_context(), *serialized_result);
+
+                    auto is_valid = webp_capture_injector_instance->get_serialized_field_valid_method->call<bool>(
+                        api->get_vm_context(), *serialized_result);
+
+                    if (is_completed && is_valid) {
+                        // Spoof it with an always valid array to skip original serialization
+                        webp_capture_injector_instance->original_webp_array = webp_capture_injector_instance->get_serialized_field_content_method->call
+                            <reframework::API::ManagedObject*>(api->get_vm_context(), *serialized_result);
+
+                        webp_capture_injector_instance->always_valid_array->add_ref();
+
+                        set_serialize_result_array(*serialized_result, webp_capture_injector_instance->always_valid_array);
+
+                        api->log_info("Spoofed SerializedResult content array to skip original serialization");
+                        webp_capture_injector_instance->spoofed_result = true;
+                    }
+                }
+
+                if (webp_capture_injector_instance->spoofed_result && webp_capture_injector_instance->is_capture_done) {
+                    api->log_info("Capture already done and result already spoofed, proceed to next state");
+                    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+                }
+                
                 return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
             }
         }
@@ -62,6 +109,7 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
             webp_capture_injector_instance->has_request_capture = true;
             webp_capture_injector_instance->is_capture_done = false;
             webp_capture_injector_instance->inject_pending = false;
+            webp_capture_injector_instance->spoofed_result = false;
 
             if (webp_capture_injector_instance->client) {
                 auto func = std::bind(&WebPCaptureInjector::on_client_provide_webp_data, webp_capture_injector_instance.get(), std::placeholders::_1,
@@ -98,14 +146,10 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
 
             if (original_capture_data) {
                 auto mod_settings = ModSettings::get_instance();
-                if (mod_settings->dump_original_webp) {
-                    std::vector<std::uint8_t> buffer;
-                    auto length = original_capture_data->call<int>("GetLength", vm_context, original_capture_data);
-                    buffer.resize(length);
-    
-                    for (int i = 0; i < length; i++) {
-                        buffer[i] = original_capture_data->call<std::uint8_t>("Get", vm_context, original_capture_data, i);
-                    }
+                if (mod_settings->dump_original_webp && webp_capture_injector_instance->original_webp_array) {
+                    auto actual_webp_array = webp_capture_injector_instance->original_webp_array;
+                    auto length = actual_webp_array->call<int>("GetLength", vm_context, actual_webp_array);
+                    auto array_content_ptr = get_array_ptr<std::uint8_t>(actual_webp_array);
 
                     static constexpr const char *DEBUG_FILE_NAME_FORMAT = "reframework/data/MHWilds_HighQualityPhotoMod_OriginalImage_{}.webp";
                     std::string debug_file_name = std::format(DEBUG_FILE_NAME_FORMAT, mod_settings->debug_file_postfix);
@@ -119,12 +163,15 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
                     auto debug_path = persistent_dir/ debug_file_name;
 
                     std::ofstream original(debug_path.string(), std::istream::out | std::istream::binary);
-                    original.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+                    original.write(reinterpret_cast<const char*>(array_content_ptr), length);
                     original.flush();
                     original.close();
                 }
 
                 original_capture_data->release();
+
+                if (webp_capture_injector_instance->original_webp_array)
+                    webp_capture_injector_instance->original_webp_array->release();
             }
 
             auto& capture_buffer_ref = *webp_capture_injector_instance->copied_buffer;
@@ -133,17 +180,12 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
 
             new_capture_data_array->add_ref();
 
-            auto new_data_array_type = new_capture_data_array->get_type_definition();
-            auto method_set = new_data_array_type->find_method("Set");
-
-            for (int i = 0; i < capture_buffer_ref.size(); i++) {
-                webp_capture_injector_instance->set_array_byte_method->call(vm_context, new_capture_data_array, i, capture_buffer_ref[i]);
-            }
+            auto array_content_ptr = get_array_ptr<std::uint8_t>(new_capture_data_array);
+            std::memcpy(array_content_ptr, capture_buffer_ref.data(), capture_buffer_ref.size());
 
             api->log_info("Inject new WebP image finished!");
 
-            *reinterpret_cast<reframework::API::ManagedObject**>(
-                reinterpret_cast<std::uint8_t*>(*serialized_result) + SerializeResultContentArrayOffset) = new_capture_data_array;
+            set_serialize_result_array(*serialized_result, new_capture_data_array);
         }
 
         if (webp_capture_injector_instance->has_request_capture && capture_state == SAVECAPTURESTATE_IDLE) {
@@ -391,10 +433,11 @@ WebPCaptureInjector::WebPCaptureInjector(reframework::API *api)
 
     album_manager = api->get_managed_singleton("app.AlbumManager");
     get_serialized_field_content_method = tdb->find_method("via.render.SerializedResult", "get_Content");
-    set_array_byte_method = tdb->find_method("System.Byte[]", "Set");
+    get_serialized_field_completed_method = tdb->find_method("via.render.SerializedResult", "get_Completed");
+    get_serialized_field_valid_method = tdb->find_method("via.render.SerializedResult", "get_Valid");
     byte_type = tdb->find_type("System.Byte");
     
-    auto update_save_capture_method = tdb->find_method("app.AlbumManager", "updateSaveCapture");
+    update_save_capture_method = tdb->find_method("app.AlbumManager", "updateSaveCapture");
     if (!update_save_capture_method) {
         api->log_info("Can't find updateSaveCapture method");
         return;
@@ -402,6 +445,19 @@ WebPCaptureInjector::WebPCaptureInjector(reframework::API *api)
 
     update_save_capture_method->add_hook(pre_start_update_save_capture, post_start_update_save_capture, false);
     //hook_to_extend_webp_max_size();
+
+    always_valid_array = api->create_managed_array(byte_type, 5);
+    always_valid_array->add_ref();
+
+    std::uint8_t* array_ptr = get_array_ptr<std::uint8_t>(always_valid_array);
+    std::memset(array_ptr, 0x00, 5);
+}
+
+WebPCaptureInjector::~WebPCaptureInjector() {
+    if (always_valid_array) {
+        always_valid_array->release();
+        always_valid_array = nullptr;
+    }
 }
 
 void WebPCaptureInjector::hook_to_extend_webp_max_size() {

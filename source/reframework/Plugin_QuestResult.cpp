@@ -9,6 +9,7 @@
 
 #undef API
 
+#include <reframework/API.hpp>
 #include "Plugin_QuestResult.hpp"
 #include "MHWildsTypes.h"
 #include "ModSettings.hpp"
@@ -139,6 +140,35 @@ int Plugin_QuestResult::pre_quest_success_hook(int argc, void** argv, REFramewor
 
     if (mod_settings == nullptr || plugin_instance == nullptr) {
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    if (!mod_settings->enable_override_quest_success) {
+        // If Akuma end-screen, dont bother, the game does its things
+        auto &api = reframework::API::get();
+        auto vm_context = api->get_vm_context();
+
+        auto player_manager_instance = api->get_managed_singleton("app.PlayerManager");
+        if (player_manager_instance != nullptr) {
+            auto master_player_info_ptr = player_manager_instance->call<reframework::API::ManagedObject*>("getMasterPlayer", vm_context, player_manager_instance);
+            if (master_player_info_ptr != nullptr) {
+                auto character_ptr = master_player_info_ptr->call<reframework::API::ManagedObject*>("get_Character", vm_context, master_player_info_ptr);
+                if (character_ptr != nullptr) {
+                    auto is_akuma = character_ptr->call<bool>("isEquipArmorExEmote00", vm_context, character_ptr);
+                    if (is_akuma) {
+                        api->log_info("Akuma detected, skipping quest success override");
+                        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+                    } else {
+                        api->log_info("Not Akuma, proceed override kill screen as normal");
+                    }
+                } else {
+                    api->log_info("Character is null, skipping Akuma check");
+                }
+            } else {
+                api->log_info("MasterPlayerInfo is null, skipping Akuma check");
+            }
+        } else {
+            api->log_info("PlayerManager instance is null, skipping Akuma check");
+        }
     }
 
     plugin_instance->decide_and_set_screen_cap_or_override_inject(plugin_instance->quest_success_force_client,
@@ -425,6 +455,15 @@ void Plugin_QuestResult::draw_user_interface() {
             }
 
             igText("Path to WebP: <GameDir>/reframework/data/MHWilds_HighQualityPhotoMod_HighQuality_QuestResult.png/webp");
+
+            igText("Debug Capture Delay");
+            igSameLine(0.0f, 5.0f);
+            igCheckbox("##DebugCaptureDelayEnableQR", &mod_settings->debug_capture_delay);
+
+            igText("Simulate Capture Delay Seconds");
+            igSameLine(0.0f, 5.0f);
+            igInputFloat("##DebugCaptureDelayQR", &mod_settings->simulate_capture_delay_seconds, 0.5f, 2.0f, "%.2f", ImGuiInputTextFlags_None);
+            
             igTreePop();
         }
 

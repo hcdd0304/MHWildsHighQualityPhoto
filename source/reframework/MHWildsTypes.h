@@ -24,3 +24,4 @@ enum LoadCaptureState {
 const std::size_t SerializeResultContentArrayOffset = 0x90;
 const std::size_t MaxSerializePhotoSize = 0xF0000;
 const std::size_t MaxSerializePhotoSizeOriginal = 0x40000;
+const std::size_t ArrayPtrOffset = 0x20;
