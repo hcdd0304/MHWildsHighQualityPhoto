@@ -475,6 +475,10 @@ static void capture_screenshot_impl() {
         reshade::log::message(reshade::log::level::debug, "Capturing screenshot finished");
     #endif
 
+        if (g_finish_callback != nullptr) {
+            g_finish_callback(RESULT_SCREEN_CAPTURE_DATA_DOWNLOADED, width, height, nullptr);
+        }
+
         if (!is_hdr) {
     #ifdef LOG_DEBUG_STEP
             reshade::log::message(reshade::log::level::debug, "Screenshot is not HDR, sending it directly");
@@ -529,6 +533,10 @@ static void capture_screenshot_impl() {
     #ifdef LOG_DEBUG_STEP
         reshade::log::message(reshade::log::level::debug, "Capturing screenshot finished");
     #endif
+
+        if (g_finish_callback != nullptr) {
+            g_finish_callback(RESULT_SCREEN_CAPTURE_DATA_DOWNLOADED, width, height, nullptr);
+        }
 
         if (!is_hdr) {
     #ifdef LOG_DEBUG_STEP

@@ -447,6 +447,16 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
     auto& api = reframework::API::get();
     auto mod_settings = ModSettings::get_instance();
 
+    if (result == RESULT_SCREEN_CAPTURE_DATA_DOWNLOADED) {
+        api->log_info("Frame data downloaded, continuing camera");
+
+        // Done with the screenshot, restore back the camera request
+        reshade_addon_client_instance->restore_back_hunt_complete_camera_request();
+        reshade_addon_client_instance->should_skip_camera_update = false;
+
+        return;
+    }
+
 #ifdef LOG_DEBUG_STEP
     api->log_info("Capture screenshot callback called with result: %d, width: %d, height: %d", result, width, height);
 #endif
@@ -507,9 +517,6 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
         api->log_info("Screen capture failed with error code: %d", result);
         reshade_addon_client_instance->finish_capture(false);
     }
-
-    // Done with the screenshot, restore back the camera request
-    reshade_addon_client_instance->restore_back_hunt_complete_camera_request();
 }
 
 void ReShadeAddOnInjectClient::finish_capture(bool success, std::vector<std::uint8_t>* provided_data) {
@@ -703,8 +710,6 @@ void ReShadeAddOnInjectClient::restore_back_hunt_complete_camera_request() {
     api->log_info("Allowing hunt complete to play. Flags: 0x%llX, hunt complete target: 0x%llX",
         player_camera_global_request_flags_backup,
         reinterpret_cast<uintptr_t>(hunt_complete_target_access_key_ptr_backup));
-
-    should_skip_camera_update = false;
 }
 
 int ReShadeAddOnInjectClient::pre_close_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
