@@ -516,6 +516,7 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
         // Handle error
         api->log_info("Screen capture failed with error code: %d", result);
         reshade_addon_client_instance->finish_capture(false);
+        reshade_addon_client_instance->done_capture = true;
     }
 }
 
