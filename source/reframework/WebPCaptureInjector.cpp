@@ -28,13 +28,27 @@ void set_serialize_result_array(reframework::API::ManagedObject *serialized_resu
 }
 
 int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    auto settings = ModSettings::get_instance();
+
     if (!webp_capture_injector_instance) {
+        if (settings->heavy_debug_logging) {
+            auto &api = reframework::API::get();
+            if (api) {
+                api->log_info("WebPCaptureInjector instance is null in pre_start_update_save_capture. This should not even happen");
+            }
+        }
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
     auto album_manager = webp_capture_injector_instance->album_manager;
 
     if (!album_manager) {
+        if (settings->heavy_debug_logging) {
+            if (webp_capture_injector_instance->api) {
+                webp_capture_injector_instance->api->log_info("AlbumManager is empty while trying to pre_start_update_save_capture");
+            }
+        }
+
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
@@ -48,6 +62,9 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
         if (webp_capture_injector_instance->has_request_capture) {
             if (capture_state == SAVECAPTURESTATE_WAIT_SERIALIZE) {
                 auto serialized_result_ptr = album_manager->get_field<reframework::API::ManagedObject*>("_SerializedResult");
+                if (settings->heavy_debug_logging) {
+                    api->log_info("Current capture state is in wait serialize, serializer pointer 0x%p", (void*)serialized_result_ptr);
+                }
                 if (serialized_result_ptr && *serialized_result_ptr && !webp_capture_injector_instance->spoofed_result) {
                     auto serialized_result = serialized_result_ptr;
                     auto is_completed = webp_capture_injector_instance->get_serialized_field_completed_method->call<bool>(
@@ -55,6 +72,10 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
 
                     auto is_valid = webp_capture_injector_instance->get_serialized_field_valid_method->call<bool>(
                         api->get_vm_context(), *serialized_result);
+
+                    if (settings->heavy_debug_logging) {
+                        api->log_info("SerializedResult is completed: %d, is valid: %d", is_completed, is_valid);
+                    }
 
                     if (is_completed && is_valid) {
                         // Spoof it with an always valid array to skip original serialization
@@ -76,6 +97,10 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
                 }
                 
                 return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
+            } else {
+                if (settings->heavy_debug_logging) {
+                    api->log_info("Current capture state (pre-update) is: %d", (int)capture_state);
+                }
             }
         }
     }
@@ -84,7 +109,14 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
 }
 
 void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
+    auto settings = ModSettings::get_instance();
+
     if (!webp_capture_injector_instance) {
+        if (settings->heavy_debug_logging) {
+            auto &api = reframework::API::get();
+            api->log_info("WebPCaptureInjector instance is null in post_start_update_save_capture. This should not even happen");
+        }
+
         return;
     }
 
@@ -94,6 +126,18 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
     auto tdb = api->tdb();
 
     if (!album_manager || !api || !vm_context) {
+        if (settings->heavy_debug_logging) {
+            if (!album_manager && api) {
+                api->log_info("AlbumManager is empty while trying to post_start_update_save_capture");
+            }
+            if (!api) {
+                api->log_info("API is empty while trying to post_start_update_save_capture");
+            }
+            if (!vm_context && api) {
+                api->log_info("VMContext is empty while trying to post_start_update_save_capture");
+            }
+        }
+
         return;
     }
     
@@ -193,6 +237,10 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
             webp_capture_injector_instance->is_capture_done = false;
             webp_capture_injector_instance->has_injected = false;
             webp_capture_injector_instance->copied_buffer.reset();
+        }
+
+        if (webp_capture_injector_instance->has_request_capture && settings->heavy_debug_logging) {
+            api->log_info("Current capture state (post-update) is: %d", (int)capture_state);
         }
     }
 }

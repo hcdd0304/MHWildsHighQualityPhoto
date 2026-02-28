@@ -380,6 +380,12 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
         width = force_size_width;
         height = force_size_height;
     }
+
+    // Set alpha all to 1, for some reasons alpha on some machine is not 1
+    for (int i = 0; i < width * height; i++) {
+        std::uint8_t alpha = data[i * 4 + 3];
+        data[i * 4 + 3] = 255;
+    }
     
     bool is_lossless = reshade_addon_client_instance->is_lossless();
 

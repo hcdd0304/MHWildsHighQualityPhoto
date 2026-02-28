@@ -464,6 +464,10 @@ void Plugin_QuestResult::draw_user_interface() {
             igSameLine(0.0f, 5.0f);
             igInputFloat("##DebugCaptureDelayQR", &mod_settings->simulate_capture_delay_seconds, 0.5f, 2.0f, "%.2f", ImGuiInputTextFlags_None);
             
+            igText("Heavy Debug Logging");
+            igSameLine(0.0f, 5.0f);
+            igCheckbox("##HeavyDebugLoggingQR", &mod_settings->heavy_debug_logging);
+
             igTreePop();
         }
 

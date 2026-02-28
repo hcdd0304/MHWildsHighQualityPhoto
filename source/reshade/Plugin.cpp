@@ -82,10 +82,14 @@ std::string get_current_dll_path() {
     return std::string(path);
 }
 
-static void convert_hdr_to_sdr_with_hdrfix(const std::string &input_path) {
+static void convert_hdr_to_sdr_with_hdrfix(const std::string &input_path, std::chrono::system_clock::rep unique_id) {
     // Call hdrfix to convert HDR to SDR
-    auto unique_id = std::chrono::system_clock::now().time_since_epoch().count();
     auto original_dll_containing_path = std::filesystem::path(get_current_dll_path()).parent_path().parent_path();
+
+    if (!std::filesystem::exists(input_path)) {
+        auto msg = std::format("Input HDR file does not exist: {}", input_path);
+        reshade::log::message(reshade::log::level::warning, msg.c_str());
+    }
 
     auto path_to_exe = (original_dll_containing_path / "hdrfix.exe").string();
     auto path_output = (std::filesystem::temp_directory_path() / std::format("hdrfix_output{0}.png", unique_id)).string();
@@ -95,9 +99,17 @@ static void convert_hdr_to_sdr_with_hdrfix(const std::string &input_path) {
     int result = subprocess_create(command_line, subprocess_option_no_window, &subprocess);
 
     if (0 != result) {
+        if (!std::filesystem::exists(path_to_exe)) {
+            reshade::log::message(reshade::log::level::error, "hdrfix.exe not found, cannot convert HDR screenshot to SDR");
+        }
+
+        auto msg = std::format("Failed to launch hdrfix.exe, subprocess_create returned error code {}", result);
+        reshade::log::message(reshade::log::level::error, msg.c_str());
+
         if (g_finish_callback) {
             g_finish_callback(RESULT_SCREEN_CAPTURE_HDR_TO_SDR_FAILED, 0, 0, nullptr);
         }
+
         g_finish_callback = nullptr;
         return;
     }
@@ -110,14 +122,22 @@ static void convert_hdr_to_sdr_with_hdrfix(const std::string &input_path) {
 #endif
 
     if (0 != process_return_code) {
+        auto msg = std::format("hdrfix.exe failed with return code {}", process_return_code);
+        reshade::log::message(reshade::log::level::warning, msg.c_str());
+
+        /*
         if (g_finish_callback) {
             g_finish_callback(RESULT_SCREEN_CAPTURE_HDR_TO_SDR_FAILED, 0, 0, nullptr);
         }
         g_finish_callback = nullptr;
         return;
+        */
     }
 
     if (!std::filesystem::exists(path_output)) {
+        auto msg = std::format("hdrfix.exe did not produce output file at expected location: {}", path_output);
+        reshade::log::message(reshade::log::level::error, msg.c_str());
+
         if (g_finish_callback) {
             g_finish_callback(RESULT_SCREEN_CAPTURE_HDR_TO_SDR_FAILED, 0, 0, nullptr);
         }
@@ -149,6 +169,8 @@ static void convert_hdr_to_sdr_with_hdrfix(const std::string &input_path) {
         }
         stbi_image_free(data_result);
     } else {
+        reshade::log::message(reshade::log::level::error, "Failed to read converted SDR image from hdrfix output");
+
         if (g_finish_callback) {
             g_finish_callback(RESULT_SCREEN_CAPTURE_HDR_NOT_SAVEABLE, 0, 0, nullptr);
         }
@@ -164,6 +186,9 @@ static void hdr_convert_thread(std::uint8_t * pixels, std::uint32_t width, std::
     auto temp_path = std::filesystem::temp_directory_path() / std::format("reshade_hdr_temporary_screenshot{0}.png", unique_id);
     auto temp_path_string = temp_path.string();
     auto temp_path_wstring = temp_path.wstring();
+
+    auto original_dll_containing_path = std::filesystem::path(get_current_dll_path()).parent_path().parent_path();
+    auto current_directory_output_path = original_dll_containing_path / std::format("reshade_hdr_screenshot{0}.png", unique_id);
     
 #ifdef LOG_DEBUG_STEP
     reshade::log::message(reshade::log::level::debug, "Write HDR screenshot to disk");
@@ -186,8 +211,14 @@ static void hdr_convert_thread(std::uint8_t * pixels, std::uint32_t width, std::
     reshade::log::message(reshade::log::level::debug, "Call HDR fix to convert to SDR");
 #endif
 
+    // Copy temp_path file to current directory for hdrfix to work around its path issues
+    std::filesystem::copy_file(temp_path, current_directory_output_path, std::filesystem::copy_options::overwrite_existing);
+
+    auto msg_copy = std::format("Copied HDR temp file to current directory for hdrfix: {}", current_directory_output_path.string());
+    reshade::log::message(reshade::log::level::debug, msg_copy.c_str());
+
     // Use shared function to convert HDR to SDR
-    convert_hdr_to_sdr_with_hdrfix(temp_path_string);
+    convert_hdr_to_sdr_with_hdrfix(temp_path_string, unique_id);
     is_hdr_converting = false;
 }
 
@@ -238,7 +269,7 @@ static void hdr_save_thread_v67(std::uint8_t *pixels, std::uint32_t width, std::
 #endif
 
         // Use shared function to convert HDR to SDR
-        convert_hdr_to_sdr_with_hdrfix(temp_path_string);
+        convert_hdr_to_sdr_with_hdrfix(temp_path_string, unique_id);
     } else {
 #ifdef LOG_DEBUG_STEP
         reshade::log::message(reshade::log::level::debug, "HDR PNG save failed");
@@ -478,6 +509,28 @@ static void capture_screenshot_impl() {
         if (g_finish_callback != nullptr) {
             g_finish_callback(RESULT_SCREEN_CAPTURE_DATA_DOWNLOADED, width, height, nullptr);
         }
+
+        // Create a thread that dump qnauntized pixels to PNG
+        /*
+        auto dump_to_png_quantized = [=]() {
+            auto original_dll_containing_path = std::filesystem::path(get_current_dll_path()).parent_path().parent_path();
+            auto path_output = (original_dll_containing_path / "test.png").string();
+
+            stbi_write_png_to_func(
+                [](void *context, void *data, int size) {
+                    fwrite(data, 1, size, static_cast<FILE *>(context));
+                },
+                fopen(path_output.c_str(), "wb"),
+                width,
+                height,
+                (quantization_format == reshade::api::format::r8g8b8a8_unorm) ? 4 : 3,
+                quantized_pixels,
+                0);
+
+                reshade::log::message(reshade::log::level::debug, "Dumped quantized PNG for debugging to test.png");
+        };
+
+        std::thread(dump_to_png_quantized).detach();*/
 
         if (!is_hdr) {
     #ifdef LOG_DEBUG_STEP

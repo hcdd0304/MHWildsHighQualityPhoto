@@ -77,6 +77,8 @@ struct ModSettings {
 
     float simulate_capture_delay_seconds = 17.0f;
 
+    bool heavy_debug_logging = false;
+
     bool data_changed(const ModSettings &clone) {
         return enable_override_album_image != clone.enable_override_album_image ||
             override_album_image_path != clone.override_album_image_path ||
@@ -101,7 +103,8 @@ struct ModSettings {
             fix_framegen_artifacts != clone.fix_framegen_artifacts ||
             freeze_game_frames != clone.freeze_game_frames ||
             simulate_capture_delay_seconds != clone.simulate_capture_delay_seconds ||
-            debug_capture_delay != clone.debug_capture_delay;
+            debug_capture_delay != clone.debug_capture_delay ||
+            heavy_debug_logging != clone.heavy_debug_logging;
     }
 
     bool is_high_quality_photo_mode_enabled() const {
