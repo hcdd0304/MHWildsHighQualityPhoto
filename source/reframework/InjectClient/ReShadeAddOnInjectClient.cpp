@@ -494,18 +494,28 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
             api->log_info("Cropping black bars from %dx%d: left %d, top %d, right %d, bottom %d (content %dx%d)",
                 width, height, crop_rect.left, crop_rect.top, crop_rect.right, crop_rect.bottom, crop_width, crop_height);
 
-            cropped_buffer_if_have.resize(static_cast<std::size_t>(crop_width) * crop_height * 4);
+            // Letterboxing (bars only on top/bottom) keeps the content spanning the full width,
+            // so the cropped rows are still contiguous with the same stride. Just advance the
+            // pointer to the first content row and shrink the height - no copy needed.
+            if (crop_rect.left == 0 && crop_rect.right == width) {
+                data += static_cast<std::size_t>(crop_rect.top) * width * 4;
+                width = crop_width;   // unchanged
+                height = crop_height;
+            } else {
+                // Pillarboxing (bars on left/right): rows are not contiguous, copy into a tight buffer.
+                cropped_buffer_if_have.resize(static_cast<std::size_t>(crop_width) * crop_height * 4);
 
-            for (int y = 0; y < crop_height; ++y) {
-                std::memcpy(
-                    cropped_buffer_if_have.data() + static_cast<std::size_t>(y) * crop_width * 4,
-                    data + static_cast<std::size_t>(crop_rect.top + y) * width * 4 + crop_rect.left * 4,
-                    static_cast<std::size_t>(crop_width) * 4);
+                for (int y = 0; y < crop_height; ++y) {
+                    std::memcpy(
+                        cropped_buffer_if_have.data() + static_cast<std::size_t>(y) * crop_width * 4,
+                        data + static_cast<std::size_t>(crop_rect.top + y) * width * 4 + crop_rect.left * 4,
+                        static_cast<std::size_t>(crop_width) * 4);
+                }
+
+                data = cropped_buffer_if_have.data();
+                width = crop_width;
+                height = crop_height;
             }
-
-            data = cropped_buffer_if_have.data();
-            width = crop_width;
-            height = crop_height;
         }
     }
 
@@ -658,7 +668,43 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
                 auto debug_path = persistent_dir / DEBUG_FILE_NAME;
                 auto debug_path_str = debug_path.string();
 
-                stbi_write_png(debug_path_str.c_str(), width, height, 4, data_ptr, width * 4);
+                // Dump the actual cropped content (without black bars) when the crop setting
+                // is enabled, so the debug image matches the content that gets resized/encoded.
+                const std::uint8_t* dump_data = data_ptr;
+                int dump_width = width;
+                int dump_height = height;
+                std::vector<std::uint8_t> cropped_dump_buffer;
+
+                auto mod_settings = ModSettings::get_instance();
+                if (mod_settings != nullptr && mod_settings->crop_black_bars) {
+                    BlackBarCropRect crop_rect;
+                    if (detect_black_bar_crop(data_ptr, width, height, crop_rect)) {
+                        const int crop_width = crop_rect.right - crop_rect.left;
+                        const int crop_height = crop_rect.bottom - crop_rect.top;
+
+                        // Full-width content (letterboxing): rows stay contiguous with the same
+                        // stride, so just advance the pointer - no copy needed.
+                        if (crop_rect.left == 0 && crop_rect.right == width) {
+                            dump_data = data_ptr + static_cast<std::size_t>(crop_rect.top) * width * 4;
+                            dump_width = crop_width;   // unchanged
+                            dump_height = crop_height;
+                        } else {
+                            // Pillarboxing present: rows are not contiguous, copy into a tight buffer.
+                            cropped_dump_buffer.resize(static_cast<std::size_t>(crop_width) * crop_height * 4);
+                            for (int y = 0; y < crop_height; ++y) {
+                                std::memcpy(
+                                    cropped_dump_buffer.data() + static_cast<std::size_t>(y) * crop_width * 4,
+                                    data_ptr + static_cast<std::size_t>(crop_rect.top + y) * width * 4 + crop_rect.left * 4,
+                                    static_cast<std::size_t>(crop_width) * 4);
+                            }
+                            dump_data = cropped_dump_buffer.data();
+                            dump_width = crop_width;
+                            dump_height = crop_height;
+                        }
+                    }
+                }
+
+                stbi_write_png(debug_path_str.c_str(), dump_width, dump_height, 4, dump_data, dump_width * 4);
             }
         });
 
