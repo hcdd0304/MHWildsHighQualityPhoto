@@ -22,8 +22,8 @@ private:
 
     reframework::API* api = nullptr;
     reframework::API::ManagedObject *album_manager = nullptr;
-    reframework::API::ManagedObject *system_module_option_obj = nullptr;
-    reframework::API::Method *get_resolution_method = nullptr;
+    reframework::API::Method *get_main_view_method = nullptr;
+    reframework::API::Method *get_size_method = nullptr;
     reframework::API::Method *is_widescreen_method = nullptr;
 
     reframework::API::ManagedObject **render_target_texture_holder_field_16x9 = nullptr;
@@ -47,10 +47,13 @@ private:
 
     void update_gui_texture();
 
-public:
-    static int pre_gui_system_module_option_on_late_update(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
-    static void post_gui_system_module_option_on_late_update(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+    // Lazily resolves app.AlbumManager and the render target fields/holders on first use.
+    bool ensure_album_manager_and_fields();
 
+    // Queries the current game resolution via via.SceneManager (mirrors the REFramework Lua GetScreenSize()).
+    bool get_screen_size(float& width, float& height);
+
+public:
     static int pre_gui070002_on_open(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void post_gui070002_on_open(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
 

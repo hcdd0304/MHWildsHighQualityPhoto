@@ -32,25 +32,25 @@ private:
     int total_hide_frame{ -1 };
     int hide_frames_passed{ -1 };
 
-    bool is_in_quest_result;
+    bool is_in_quest_result = false;
 
-    reframework::API::ManagedObject *notification_GO;
-    reframework::API::ManagedObject *display_settings;
-    reframework::API::ManagedObject *gui_system_module_option;
+    reframework::API::ManagedObject *notification_GO = nullptr;
+    reframework::API::ManagedObject *display_settings = nullptr;
+    reframework::API::ManagedObject *gui_system_module_option = nullptr;
 
-    reframework::API::Method *display_settings_get_UseSDRBrightnessOptionForOverlay;
-    reframework::API::Method *display_settings_set_UseSDRBrightnessOptionForOverlay;
-    reframework::API::Method *display_settings_get_gamma_for_overlay;
-    reframework::API::Method *display_settings_get_output_lower_limit_for_overlay;
-    reframework::API::Method *display_settings_get_output_upper_limit_for_overlay;
-    reframework::API::Method *display_settings_set_gamma_for_overlay;
-    reframework::API::Method *display_settings_set_output_lower_limit_for_overlay;
-    reframework::API::Method *display_settings_set_output_upper_limit_for_overlay;
-    reframework::API::Method *display_settings_update_request;
-    reframework::API::Method *app_option_util_is_hdr_enabled;
-    reframework::API::Method *gui_system_module_option_on_update;
-    reframework::API::Method *gui_system_module_option_apply_setting;
-    reframework::API::Method *gui_system_module_option_get_value;
+    reframework::API::Method *display_settings_get_UseSDRBrightnessOptionForOverlay = nullptr;
+    reframework::API::Method *display_settings_set_UseSDRBrightnessOptionForOverlay = nullptr;
+    reframework::API::Method *display_settings_get_gamma_for_overlay = nullptr;
+    reframework::API::Method *display_settings_get_output_lower_limit_for_overlay = nullptr;
+    reframework::API::Method *display_settings_get_output_upper_limit_for_overlay = nullptr;
+    reframework::API::Method *display_settings_set_gamma_for_overlay = nullptr;
+    reframework::API::Method *display_settings_set_output_lower_limit_for_overlay = nullptr;
+    reframework::API::Method *display_settings_set_output_upper_limit_for_overlay = nullptr;
+    reframework::API::Method *display_settings_update_request = nullptr;
+    reframework::API::Method *app_option_util_is_hdr_enabled = nullptr;
+    reframework::API::Method *gui_system_module_option_on_update = nullptr;
+    reframework::API::Method *gui_system_module_option_apply_setting = nullptr;
+    reframework::API::Method *gui_system_module_option_get_value = nullptr;
 
     int sdr_gamma { 10 };
     int sdr_output_lower_limit { 0 };
@@ -72,6 +72,9 @@ private:
     void backup_necessary_display_settings();
     void restore_necessary_display_settings();
     void apply_neutral_brightness_settings();
+
+    // Lazily resolves app.GraphicsManager -> DisplaySettings (and its methods) on first use.
+    bool ensure_display_settings();
 
     explicit GameUIController(const REFrameworkPluginInitializeParam* initialize_params);
 

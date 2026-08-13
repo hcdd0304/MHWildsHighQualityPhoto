@@ -20,6 +20,9 @@ private:
 
     void try_dump_webp();
 
+    // Lazily resolves the app.AlbumManager singleton on first use.
+    reframework::API::ManagedObject *get_album_manager();
+
     bool is_enabled = false;
 
 public:

@@ -13,6 +13,9 @@
 #include <avir.h>
 #include <avir_float4_sse.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <deque>
 #include <future>
 #include <fstream>
@@ -56,6 +59,117 @@ private:
     std::deque<std::future<void>> _tasks;
     std::deque<CWorkload*> _workloads;
 };
+
+namespace {
+    // Tolerances used when detecting black bars (letterboxing/pillarboxing) in a captured
+    // frame. This happens when the game renders a wider aspect ratio (eg 21:9) than the
+    // monitor supports (eg 16:9), drawing the actual content in the center with black bars.
+    constexpr int BLACK_BAR_PIXEL_THRESHOLD = 24;             // RGB channels <= this count as black
+    constexpr float BLACK_BAR_CONTENT_MIN_FRACTION = 0.005f;   // min fraction of a line that must be non-black to count as content
+    constexpr float BLACK_BAR_ASPECT_TOLERANCE = 0.05f;        // allowed aspect-ratio difference between cropped content and target
+
+    struct BlackBarCropRect {
+        int left = 0;
+        int top = 0;
+        int right = 0;   // exclusive
+        int bottom = 0;  // exclusive
+    };
+
+    // Detects the bounding box of the actual rendered content inside `data` (RGBA, 4 bytes/px),
+    // ignoring black bars. Returns false when there's nothing meaningful to crop.
+    bool detect_black_bar_crop(const std::uint8_t* data, int width, int height, BlackBarCropRect& out) {
+        const int stride = width * 4;
+        const int content_count_row = std::max(1, static_cast<int>(width * BLACK_BAR_CONTENT_MIN_FRACTION));
+        const int content_count_col = std::max(1, static_cast<int>(height * BLACK_BAR_CONTENT_MIN_FRACTION));
+
+        std::vector<bool> row_has_content(static_cast<std::size_t>(height), false);
+        for (int y = 0; y < height; ++y) {
+            const std::uint8_t* row = data + static_cast<std::size_t>(y) * stride;
+            int content_pixels = 0;
+            for (int x = 0; x < width; ++x) {
+                const std::uint8_t* p = row + static_cast<std::size_t>(x) * 4;
+                if (p[0] > BLACK_BAR_PIXEL_THRESHOLD || p[1] > BLACK_BAR_PIXEL_THRESHOLD || p[2] > BLACK_BAR_PIXEL_THRESHOLD) {
+                    if (++content_pixels >= content_count_row) {
+                        break;
+                    }
+                }
+            }
+            row_has_content[static_cast<std::size_t>(y)] = (content_pixels >= content_count_row);
+        }
+
+        int top = 0;
+        while (top < height && !row_has_content[static_cast<std::size_t>(top)]) {
+            ++top;
+        }
+
+        int bottom = height;
+        while (bottom > top && !row_has_content[static_cast<std::size_t>(bottom - 1)]) {
+            --bottom;
+        }
+
+        int left = 0;
+        int right = width;
+
+        if (bottom > top) {
+            std::vector<bool> col_has_content(static_cast<std::size_t>(width), false);
+            for (int x = 0; x < width; ++x) {
+                int content_pixels = 0;
+                for (int y = top; y < bottom; ++y) {
+                    const std::uint8_t* p = data + static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x) * 4;
+                    if (p[0] > BLACK_BAR_PIXEL_THRESHOLD || p[1] > BLACK_BAR_PIXEL_THRESHOLD || p[2] > BLACK_BAR_PIXEL_THRESHOLD) {
+                        if (++content_pixels >= content_count_col) {
+                            break;
+                        }
+                    }
+                }
+                col_has_content[static_cast<std::size_t>(x)] = (content_pixels >= content_count_col);
+            }
+
+            while (left < width && !col_has_content[static_cast<std::size_t>(left)]) {
+                ++left;
+            }
+            while (right > left && !col_has_content[static_cast<std::size_t>(right - 1)]) {
+                --right;
+            }
+        }
+
+        const int crop_width = right - left;
+        const int crop_height = bottom - top;
+
+        if (crop_width <= 0 || crop_height <= 0) {
+            return false;
+        }
+
+        // Only crop when the removed bars are meaningful (>= ~1% of the smaller dimension),
+        // so detection noise can't eat into actual content.
+        const int min_bar = std::max(4, std::min(width, height) / 100);
+        const bool has_bars = left >= min_bar || (width - right) >= min_bar ||
+                              top >= min_bar || (height - bottom) >= min_bar;
+
+        if (!has_bars) {
+            return false;
+        }
+
+        out = { left, top, right, bottom };
+        return true;
+    }
+
+    // Whether cropping `rect` keeps an aspect ratio close enough to
+    // `target_width`x`target_height` that resizing won't visibly distort the content.
+    bool crop_aspect_compatible(const BlackBarCropRect& rect, int target_width, int target_height) {
+        const int crop_width = rect.right - rect.left;
+        const int crop_height = rect.bottom - rect.top;
+
+        if (crop_width <= 0 || crop_height <= 0 || target_width <= 0 || target_height <= 0) {
+            return false;
+        }
+
+        const float crop_aspect = static_cast<float>(crop_width) / static_cast<float>(crop_height);
+        const float target_aspect = static_cast<float>(target_width) / static_cast<float>(target_height);
+
+        return std::abs(crop_aspect - target_aspect) <= BLACK_BAR_ASPECT_TOLERANCE * target_aspect;
+    }
+}
 
 std::unique_ptr<ReShadeAddOnInjectClient> reshade_addon_client_instance = nullptr;
 std::unique_ptr<avir_scale_thread_pool> avir_thread_pool_instance = nullptr;
@@ -158,6 +272,7 @@ void ReShadeAddOnInjectClient::do_prepare_capture() {
     freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
     freeze_timescale_frame_left = freeze_timescale_frame_total;
     should_skip_camera_update = true;
+    hunter_set_mot_group_stance_params_cache.clear();
 
     game_ui_controller->hide_for(freeze_timescale_frame_total);
 }
@@ -250,6 +365,7 @@ void ReShadeAddOnInjectClient::late_update() {
 
         if (freeze_timescale_frame_left == 0) {
             target_timescale = previous_timescale;
+            execute_pending_mot_group_stance();
             time_scale_cached = false;
         }
 
@@ -342,7 +458,10 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
     api->log_info("Compressing image data to WebP format");
 #endif
 
+    auto mod_settings = ModSettings::get_instance();
+
     std::vector<std::uint8_t> new_buffer_if_have;
+    std::vector<std::uint8_t> cropped_buffer_if_have;
 
     int force_size_width = FORCE_SIZE_WIDTH_16x9;
     int force_size_height = FORCE_SIZE_HEIGHT_16x9;
@@ -358,6 +477,35 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
             auto resolution = capture_resolution_inject->get_current_resolution_21x9();
             force_size_width = resolution.first;
             force_size_height = resolution.second;
+        }
+    }
+
+    // When the game renders a wider aspect ratio than the monitor supports (eg 21:9
+    // letterboxed on a 16:9 screen), the captured frame contains black bars on the
+    // top/bottom (and/or left/right). Crop those bars out before resizing so the actual
+    // rendered content is kept intact and isn't stretched or keeps the black bars.
+    if (mod_settings != nullptr && mod_settings->crop_black_bars) {
+        BlackBarCropRect crop_rect;
+        if (detect_black_bar_crop(data, width, height, crop_rect) &&
+            crop_aspect_compatible(crop_rect, force_size_width, force_size_height)) {
+            const int crop_width = crop_rect.right - crop_rect.left;
+            const int crop_height = crop_rect.bottom - crop_rect.top;
+
+            api->log_info("Cropping black bars from %dx%d: left %d, top %d, right %d, bottom %d (content %dx%d)",
+                width, height, crop_rect.left, crop_rect.top, crop_rect.right, crop_rect.bottom, crop_width, crop_height);
+
+            cropped_buffer_if_have.resize(static_cast<std::size_t>(crop_width) * crop_height * 4);
+
+            for (int y = 0; y < crop_height; ++y) {
+                std::memcpy(
+                    cropped_buffer_if_have.data() + static_cast<std::size_t>(y) * crop_width * 4,
+                    data + static_cast<std::size_t>(crop_rect.top + y) * width * 4 + crop_rect.left * 4,
+                    static_cast<std::size_t>(crop_width) * 4);
+            }
+
+            data = cropped_buffer_if_have.data();
+            width = crop_width;
+            height = crop_height;
         }
     }
 
@@ -421,7 +569,6 @@ void ReShadeAddOnInjectClient::compress_webp_thread(std::uint8_t *data, int widt
         } while (current_quality >= min_quality);
     }
 
-    auto mod_settings = ModSettings::get_instance();
     if (mod_settings->debug_capture_delay) {
         api->log_info("Debug capture delay enabled, simulating delay of %f seconds", mod_settings->simulate_capture_delay_seconds);
         std::this_thread::sleep_for(std::chrono::duration<float>(mod_settings->simulate_capture_delay_seconds));
@@ -859,6 +1006,20 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
     set_timescale_method = application_type->find_method("set_GlobalSpeed");
     get_timescale_method = application_type->find_method("get_GlobalSpeed");
 
+    set_mot_group_stance_method = tdb->find_method("app.HunterCharacter.cMotionSupporter", "setHunterMotGroup_Stance");
+    if (set_mot_group_stance_method == nullptr) {
+        api->log_error("Can't find HunterCharacter.cMotionSupporter.setHunterMotGroup_Stance method!");
+    }
+
+    //set_mot_group_stance_method->add_hook(pre_motion_supporter_set_hunter_mot_group_stance_proxy, null_post, false);
+
+    auto quest_failed_action_enter = tdb->find_method("app.PlayerCommonAction.cQuestFailed", "doEnter");
+    if (quest_failed_action_enter == nullptr) {
+        api->log_error("Can't find PlayerCommonAction.cQuestFailed.doEnter method!");
+    } else {
+        //quest_failed_action_enter->add_hook(pre_player_common_action_quest_failed_proxy, post_player_common_action_quest_failed_proxy, false);
+    }
+
     prepare_state = CapturePrepareState::None;
     freeze_timescale_frame_left = -1;
     should_skip_camera_update = false;
@@ -878,4 +1039,106 @@ ReShadeAddOnInjectClient::~ReShadeAddOnInjectClient() {
     if (dump_promise.valid()) {
         dump_promise.wait();
     }
+}
+
+thread_local reframework::API::ManagedObject* current_action_chara = nullptr;
+
+int ReShadeAddOnInjectClient::pre_player_common_action_quest_failed_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    auto action_ptr = reinterpret_cast<reframework::API::ManagedObject*>(argv[1]);
+    if (action_ptr == nullptr) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    auto vm_context = reframework::API::get()->get_vm_context();
+    auto chara = action_ptr->call<reframework::API::ManagedObject*>("get_Chara", vm_context, action_ptr);
+
+    if (chara == nullptr) {
+        auto &api = reframework::API::get();
+        api->log_error("Failed to get chara from action in pre_player_common_action_quest_failed_impl");
+
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    current_action_chara = chara;
+
+    if (hunter_set_mot_group_stance_params_cache.contains(current_action_chara)) {
+        hunter_set_mot_group_stance_params_cache.erase(current_action_chara);
+    }
+
+    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+}
+
+void ReShadeAddOnInjectClient::post_player_common_action_quest_failed_impl(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
+    if (current_action_chara != nullptr) {
+        current_action_chara = nullptr;
+    }
+}
+
+int ReShadeAddOnInjectClient::pre_motion_supporter_set_hunter_mot_group_stance_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    if (current_action_chara != nullptr) {
+        auto vm_context = reframework::API::get()->get_vm_context();
+
+        HunterSetMotGroupStanceParams params = {
+            reinterpret_cast<std::uint64_t>(argv[1]),
+            reinterpret_cast<std::uint64_t>(argv[2]),
+            reinterpret_cast<std::uint64_t>(argv[3]),
+            reinterpret_cast<std::uint64_t>(argv[4]),
+            reinterpret_cast<std::uint64_t>(argv[5]),
+        };
+
+        if (!hunter_set_mot_group_stance_params_cache.contains(current_action_chara)) {
+            std::vector<HunterSetMotGroupStanceParams> params_vec = { params };
+            hunter_set_mot_group_stance_params_cache.emplace(current_action_chara, params_vec);
+        } else {
+            hunter_set_mot_group_stance_params_cache[current_action_chara].push_back(params);
+        }
+
+        auto &api = reframework::API::get();
+        api->log_info("Caching setHunterMotGroup_Stance call for chara 0x%llX, total pending calls for this chara: %zu", reinterpret_cast<uintptr_t>(current_action_chara), hunter_set_mot_group_stance_params_cache[current_action_chara].size());
+
+        return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
+    }
+
+    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+}
+
+int ReShadeAddOnInjectClient::pre_motion_supporter_set_hunter_mot_group_stance_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    if (!reshade_addon_client_instance->get_is_enabled()) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    return reshade_addon_client_instance->pre_motion_supporter_set_hunter_mot_group_stance_impl(argc, argv, arg_tys, ret_addr);
+}
+
+int ReShadeAddOnInjectClient::pre_player_common_action_quest_failed_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    if (!reshade_addon_client_instance->get_is_enabled()) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    }
+
+    return reshade_addon_client_instance->pre_player_common_action_quest_failed_impl(argc, argv, arg_tys, ret_addr);
+}
+
+void ReShadeAddOnInjectClient::post_player_common_action_quest_failed_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
+    if (!reshade_addon_client_instance->get_is_enabled()) {
+        return;
+    }
+
+    reshade_addon_client_instance->post_player_common_action_quest_failed_impl(ret_val, ret_ty, ret_addr);
+}
+
+void ReShadeAddOnInjectClient::execute_pending_mot_group_stance() {
+    auto& api = reframework::API::get();
+    auto vm_context = api->get_vm_context();
+
+    api->log_info("Executing pending setHunterMotGroup_Stance calls, total charas with pending calls: %zu", hunter_set_mot_group_stance_params_cache.size());
+
+    for (auto& [chara, params_vec] : hunter_set_mot_group_stance_params_cache) {
+        api->log_info("Executing pending setHunterMotGroup_Stance for chara 0x%llX with %zu pending calls", reinterpret_cast<uintptr_t>(chara), params_vec.size());
+
+        for (auto& params : params_vec) {
+            set_mot_group_stance_method->call<void>(vm_context, params[0], params[1], params[2], params[3], params[4]);
+        }
+    }
+
+    hunter_set_mot_group_stance_params_cache.clear();
 }

@@ -79,6 +79,12 @@ struct ModSettings {
 
     bool heavy_debug_logging = false;
 
+    // When enabled, black bars (letterboxing/pillarboxing) are cropped out of the captured
+    // screenshot before it is resized to the target resolution. Useful when the game renders
+    // a wider aspect ratio (eg 21:9) on a monitor that doesn't support it (eg 16:9), which
+    // makes the game draw black bars on the top/bottom of the frame.
+    bool crop_black_bars = false;
+
     bool data_changed(const ModSettings &clone) {
         return enable_override_album_image != clone.enable_override_album_image ||
             override_album_image_path != clone.override_album_image_path ||
@@ -104,7 +110,8 @@ struct ModSettings {
             freeze_game_frames != clone.freeze_game_frames ||
             simulate_capture_delay_seconds != clone.simulate_capture_delay_seconds ||
             debug_capture_delay != clone.debug_capture_delay ||
-            heavy_debug_logging != clone.heavy_debug_logging;
+            heavy_debug_logging != clone.heavy_debug_logging ||
+            crop_black_bars != clone.crop_black_bars;
     }
 
     bool is_high_quality_photo_mode_enabled() const {

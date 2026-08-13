@@ -36,6 +36,9 @@ private:
 
     explicit WebPCaptureInjector(reframework::API *api_instance);
 
+    // Lazily resolves the app.AlbumManager singleton on first use.
+    reframework::API::ManagedObject *get_album_manager();
+
 private:
     // Hooks
     static int pre_start_update_save_capture(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);

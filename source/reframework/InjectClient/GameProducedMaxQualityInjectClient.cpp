@@ -11,6 +11,14 @@ GameProducedMaxQualityInjectClient *GameProducedMaxQualityInjectClient::get_inst
     return game_max_quality_inject_client.get();
 }
 
+reframework::API::ManagedObject *GameProducedMaxQualityInjectClient::get_album_manager() {
+    if (album_manager == nullptr) {
+        album_manager = api->get_managed_singleton("app.AlbumManager");
+    }
+
+    return album_manager;
+}
+
 GameProducedMaxQualityInjectClient::GameProducedMaxQualityInjectClient(reframework::API *api_instance)
     : api(api_instance)
     , is_capture_done(false)
@@ -23,7 +31,6 @@ GameProducedMaxQualityInjectClient::GameProducedMaxQualityInjectClient(reframewo
         return;
     }
 
-    album_manager = api->get_managed_singleton("app.AlbumManager");
     get_serialized_field_content_method = tdb->find_method("via.render.SerializedResult", "get_Content");
     get_completed_method = tdb->find_method("via.render.SerializedResult", "get_Completed");
 
@@ -80,7 +87,7 @@ int GameProducedMaxQualityInjectClient::pre_start_update_save_capture(int argc, 
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
-    auto album_manager = game_max_quality_inject_client->album_manager;
+    auto album_manager = game_max_quality_inject_client->get_album_manager();
 
     if (!album_manager) {
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;

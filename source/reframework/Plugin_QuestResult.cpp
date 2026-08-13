@@ -298,7 +298,7 @@ void Plugin_QuestResult::draw_user_interface() {
         auto mod_settings_copy = *mod_settings;
 
         igPushStyleColor_Vec4(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
-        igTextWrapped("WARNING: HDR not tested on a real HDR monitor. Do not enable this mod when use 21:9 on a 16:9 monitor, your high quality photo will have black bars on top and bottom");
+        igTextWrapped("WARNING: HDR not tested on a real HDR monitor. If you use 21:9 on a 16:9 monitor, enable \"Crop Black Bars\" below, otherwise your high quality photo will keep black bars on the top and bottom");
         igPopStyleColor(1);
 
         auto reshade_addon_client = ReShadeAddOnInjectClient::get_instance();
@@ -414,6 +414,11 @@ void Plugin_QuestResult::draw_user_interface() {
             igInputInt("##FreezeGameFrameCount", &mod_settings->freeze_game_frames, 1, 1, ImGuiInputTextFlags_None);
 
             igTextWrapped("The mod needs to freeze your game for a few frames before taking the screenshot, to hide the UI and stablise frame generation output.");
+
+            igCheckbox("Crop Black Bars", &mod_settings->crop_black_bars);
+            if (igIsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                igSetTooltip("Crops the black bars (letterboxing/pillarboxing) out of the captured screenshot before resizing it. Enable this if you play in 21:9 mode on a 16:9 screen, so the quest result image doesn't keep the black bars.");
+            }
 
             igCheckbox("Hide Chat Notification", &mod_settings->hide_chat_notification);
             if (igIsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {

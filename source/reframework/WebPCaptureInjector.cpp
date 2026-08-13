@@ -40,7 +40,7 @@ int WebPCaptureInjector::pre_start_update_save_capture(int argc, void** argv, RE
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
-    auto album_manager = webp_capture_injector_instance->album_manager;
+    auto album_manager = webp_capture_injector_instance->get_album_manager();
 
     if (!album_manager) {
         if (settings->heavy_debug_logging) {
@@ -120,7 +120,7 @@ void WebPCaptureInjector::post_start_update_save_capture(void** ret_val, REFrame
         return;
     }
 
-    auto album_manager = webp_capture_injector_instance->album_manager;
+    auto album_manager = webp_capture_injector_instance->get_album_manager();
     auto api = webp_capture_injector_instance->api;
     auto vm_context = api->get_vm_context();
     auto tdb = api->tdb();
@@ -358,7 +358,7 @@ int WebPCaptureInjector::pre_album_manager_load_hunter_profile_photo(int argc, v
 
 void WebPCaptureInjector::post_album_manager_load_hunter_profile_photo(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
     // Luckly the save data manager has not managed to load the array (YET)
-    auto album_manager = webp_capture_injector_instance->album_manager;
+    auto album_manager = webp_capture_injector_instance->get_album_manager();
     auto hunter_profile_photo_data_ptr = album_manager->get_field<reframework::API::ManagedObject*>("_HunterProfilePhotoDataCache");
 
     if (!hunter_profile_photo_data_ptr) {
@@ -474,12 +474,19 @@ void WebPCaptureInjector::post_cphoto_set_photo_data(void** ret_val, REFramework
 
 }
 
+reframework::API::ManagedObject *WebPCaptureInjector::get_album_manager() {
+    if (album_manager == nullptr) {
+        album_manager = api->get_managed_singleton("app.AlbumManager");
+    }
+
+    return album_manager;
+}
+
 WebPCaptureInjector::WebPCaptureInjector(reframework::API *api)
     : api(api)
     , album_manager(nullptr) {
     auto tdb = api->tdb();
 
-    album_manager = api->get_managed_singleton("app.AlbumManager");
     get_serialized_field_content_method = tdb->find_method("via.render.SerializedResult", "get_Content");
     get_serialized_field_completed_method = tdb->find_method("via.render.SerializedResult", "get_Completed");
     get_serialized_field_valid_method = tdb->find_method("via.render.SerializedResult", "get_Valid");

@@ -43,39 +43,6 @@ GameUIController::GameUIController(const REFrameworkPluginInitializeParam* initi
     auto on_awake_chat = tdb->find_method("app.GUI000020", "guiAwake");
     on_awake_chat->add_hook(pre_gui000020_on_gui_awake, post_gui000020_on_gui_awake, false);
 
-    auto graphics_manager = api->get_managed_singleton("app.GraphicsManager");
-
-    if (!graphics_manager) {
-        api->log_error("Failed to get GraphicsManager singleton");
-    } else {
-        auto vm_context = api->get_vm_context();
-
-        display_settings = graphics_manager->call<reframework::API::ManagedObject*>("get_DisplaySettings", vm_context,
-            graphics_manager);
-
-        if (!display_settings) {
-            api->log_error("Failed to get DisplaySettings from GraphicsManager singleton");
-        } else {
-            auto display_settings_type = display_settings->get_type_definition();
-
-            display_settings_update_request = display_settings_type->find_method("updateRequest");
-            display_settings_get_UseSDRBrightnessOptionForOverlay = display_settings_type->find_method("get_UseSDRBrightnessOptionForOverlay");
-            display_settings_set_UseSDRBrightnessOptionForOverlay = display_settings_type->find_method("set_UseSDRBrightnessOptionForOverlay");
-            display_settings_get_gamma_for_overlay = display_settings_type->find_method("get_GammaForOverlay");
-            display_settings_get_output_lower_limit_for_overlay = display_settings_type->find_method("get_OutputLowerLimitForOverlay");
-            display_settings_get_output_upper_limit_for_overlay = display_settings_type->find_method("get_OutputUpperLimitForOverlay");
-            display_settings_set_gamma_for_overlay = display_settings_type->find_method("set_GammaForOverlay");
-            display_settings_set_output_lower_limit_for_overlay = display_settings_type->find_method("set_OutputLowerLimitForOverlay");
-            display_settings_set_output_upper_limit_for_overlay = display_settings_type->find_method("set_OutputUpperLimitForOverlay");
-
-            if (!display_settings_update_request || !display_settings_get_UseSDRBrightnessOptionForOverlay || !display_settings_set_UseSDRBrightnessOptionForOverlay ||
-                !display_settings_get_gamma_for_overlay || !display_settings_get_output_lower_limit_for_overlay || !display_settings_get_output_upper_limit_for_overlay ||
-                !display_settings_set_gamma_for_overlay || !display_settings_set_output_lower_limit_for_overlay || !display_settings_set_output_upper_limit_for_overlay) {
-                api->log_error("Failed to find methods in DisplaySettings class");
-            }
-        }
-    }
-
     auto app_option_util_type = tdb->find_type("app.OptionUtil");
     app_option_util_is_hdr_enabled = app_option_util_type->find_method("isHdrEnabled");
 
@@ -94,6 +61,50 @@ GameUIController::GameUIController(const REFrameworkPluginInitializeParam* initi
     }
 
     gui_system_module_option_on_update->add_hook(pre_gui_system_module_option_on_update, post_gui_system_module_option_on_update, false);
+}
+
+bool GameUIController::ensure_display_settings() {
+    if (display_settings != nullptr) {
+        return true;
+    }
+
+    auto &api = reframework::API::get();
+
+    auto graphics_manager = api->get_managed_singleton("app.GraphicsManager");
+    if (!graphics_manager) {
+        api->log_error("Failed to get GraphicsManager singleton (deferred)");
+        return false;
+    }
+
+    auto vm_context = api->get_vm_context();
+
+    display_settings = graphics_manager->call<reframework::API::ManagedObject*>("get_DisplaySettings", vm_context,
+        graphics_manager);
+
+    if (!display_settings) {
+        api->log_error("Failed to get DisplaySettings from GraphicsManager singleton (deferred)");
+        return false;
+    }
+
+    auto display_settings_type = display_settings->get_type_definition();
+
+    display_settings_update_request = display_settings_type->find_method("updateRequest");
+    display_settings_get_UseSDRBrightnessOptionForOverlay = display_settings_type->find_method("get_UseSDRBrightnessOptionForOverlay");
+    display_settings_set_UseSDRBrightnessOptionForOverlay = display_settings_type->find_method("set_UseSDRBrightnessOptionForOverlay");
+    display_settings_get_gamma_for_overlay = display_settings_type->find_method("get_GammaForOverlay");
+    display_settings_get_output_lower_limit_for_overlay = display_settings_type->find_method("get_OutputLowerLimitForOverlay");
+    display_settings_get_output_upper_limit_for_overlay = display_settings_type->find_method("get_OutputUpperLimitForOverlay");
+    display_settings_set_gamma_for_overlay = display_settings_type->find_method("set_GammaForOverlay");
+    display_settings_set_output_lower_limit_for_overlay = display_settings_type->find_method("set_OutputLowerLimitForOverlay");
+    display_settings_set_output_upper_limit_for_overlay = display_settings_type->find_method("set_OutputUpperLimitForOverlay");
+
+    if (!display_settings_update_request || !display_settings_get_UseSDRBrightnessOptionForOverlay || !display_settings_set_UseSDRBrightnessOptionForOverlay ||
+        !display_settings_get_gamma_for_overlay || !display_settings_get_output_lower_limit_for_overlay || !display_settings_get_output_upper_limit_for_overlay ||
+        !display_settings_set_gamma_for_overlay || !display_settings_set_output_lower_limit_for_overlay || !display_settings_set_output_upper_limit_for_overlay) {
+        api->log_error("Failed to find methods in DisplaySettings class");
+    }
+
+    return true;
 }
 
 void GameUIController::hide_for(int frame_count) {
@@ -180,6 +191,11 @@ void GameUIController::backup_necessary_display_settings() {
 
     if (gui_system_module_option == nullptr) {
         api->log_error("gui_system_module_option is null, can't backup brightness settings");
+        return;
+    }
+
+    if (!ensure_display_settings()) {
+        api->log_error("DisplaySettings not available yet, can't backup brightness settings");
         return;
     }
 

@@ -31,6 +31,8 @@ private:
         Complete
     };
 
+    using HunterSetMotGroupStanceParams = std::array<uint64_t, 5>;
+
     ProvideFinishedDataCallback provide_data_finish_callback;
 
     HMODULE reshade_module = nullptr;
@@ -81,6 +83,9 @@ private:
     std::uint64_t player_camera_global_request_flags_backup = 0;
     std::vector<std::uint8_t> screenshot_data_cache;
 
+    std::unordered_map<reframework::API::ManagedObject*, std::vector<HunterSetMotGroupStanceParams>> hunter_set_mot_group_stance_params_cache;
+    reframework::API::Method *set_mot_group_stance_method = nullptr;
+
     bool done_capture = false;
 
 private:
@@ -98,6 +103,16 @@ private:
     static int pre_player_camera_controller_update_action(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void post_player_camera_controller_update_action(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
 
+    int pre_player_common_action_quest_failed_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
+    void post_player_common_action_quest_failed_impl(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+
+    int pre_motion_supporter_set_hunter_mot_group_stance_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
+
+    static int pre_player_common_action_quest_failed_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
+    static void post_player_common_action_quest_failed_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+
+    static int pre_motion_supporter_set_hunter_mot_group_stance_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
+
     static int pre_open_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static int pre_close_quest_result_ui(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void null_post(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
@@ -114,6 +129,7 @@ private:
     void restore_back_hunt_complete_camera_request();
     void do_prepare_capture();
     void manual_update_save_capture_until_complete();
+    void execute_pending_mot_group_stance();
 
 public:
     ~ReShadeAddOnInjectClient();

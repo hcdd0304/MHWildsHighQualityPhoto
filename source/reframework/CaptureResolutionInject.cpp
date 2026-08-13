@@ -35,10 +35,6 @@ void set_render_target_texture_resource(reframework::API::ManagedObject *holder,
     *reinterpret_cast<reframework::API::Resource**>(reinterpret_cast<uintptr_t>(holder) + 0x10) = resource;
 }
 
-reframework::API::Resource *get_render_target_texture_resource(reframework::API::ManagedObject *holder) {
-    return *reinterpret_cast<reframework::API::Resource**>(reinterpret_cast<uintptr_t>(holder) + 0x10);
-}
-
 static reframework::API::ManagedObject *create_render_target_texture_resource_holder(reframework::API *api, reframework::API::Resource *resource) {
     auto tdb = api->tdb();
     auto render_target_texture_holder_type = tdb->find_type(RENDER_TARGET_TEXTURE_HOLDER_TYPE_NAME);
@@ -107,66 +103,9 @@ CaptureResolutionInject::CaptureResolutionInject(reframework::API* api_instance)
         }
     }
 
-    album_manager = api->get_managed_singleton("app.AlbumManager");
-
-    if (!album_manager) {
-        api->log_error("Failed to get AlbumManager singleton");
-    }
-
-    render_target_texture_holder_field_16x9 = album_manager->get_field<reframework::API::ManagedObject*>("_RTT_16x9");
-    render_target_texture_holder_field_21x9 = album_manager->get_field<reframework::API::ManagedObject*>("_RTT_21x9");
-
-    // NOTE: Debugging, so log out the part where I add game-created render target, use mine instead
-    if (render_target_texture_holder_field_16x9) {
-        auto resource_16x9_default = *render_target_texture_holder_field_16x9;
-        if (resource_16x9_default) {
-            ResourceInfo resource_info;
-            resource_info.resource = get_render_target_texture_resource(resource_16x9_default);
-            resource_info.holder = resource_16x9_default;
-            resource_info.is_plugin_managed = false;
-
-            //capture_render_targets_by_resolution_16x9[DEFAULT_RESOLUTION_16x9] = resource_info;
-
-            default_16x9_render_target_texture_holder = resource_info.holder;
-            default_16x9_render_target_texture_holder->add_ref();
-        } else {
-            api->log_error("Failed to get default render target for 16x9 resolution. Field value is null!");
-        }
-    } else {
-        api->log_error("Failed to get default render target for 16x9 resolution");
-    }
-
-    if (render_target_texture_holder_field_21x9) {
-        auto resource_21x9_default = *render_target_texture_holder_field_21x9;
-        if (resource_21x9_default) {
-            ResourceInfo resource_info;
-            resource_info.resource = get_render_target_texture_resource(resource_21x9_default);
-            resource_info.holder = resource_21x9_default;
-            resource_info.is_plugin_managed = false;
-
-            //capture_render_targets_by_resolution_21x9[DEFAULT_RESOLUTION_21x9] = resource_info;
-            default_21x9_render_target_texture_holder = resource_info.holder;
-
-            default_21x9_render_target_texture_holder->add_ref();
-        } else {
-            api->log_error("Failed to get default render target for 21x9 resolution. Field value is null!");
-        }
-    } else {
-        api->log_error("Failed to get default render target for 21x9 resolution");
-    }
-    
     auto tdb = api->tdb();
-    auto set_option_method = tdb->find_method("app.cGUISystemModuleOption", "onLateUpdate");
-
-    if (set_option_method == nullptr) {
-        api->log_error("Failed to find onLateUpdate method in app.cGUISystemModuleOption");
-        return;
-    }
-    else {
-        set_option_method->add_hook(pre_gui_system_module_option_on_late_update, post_gui_system_module_option_on_late_update, false);
-    }
-
-    get_resolution_method = tdb->find_method("app.cGUISystemModuleOption", "getCurrentResolution");
+    get_main_view_method = tdb->find_method("via.SceneManager", "get_MainView");
+    get_size_method = tdb->find_method("via.SceneView", "get_Size");
     is_widescreen_method = tdb->find_method("app.OptionUtil", "isUltraWide");
     set_texture_method = tdb->find_method("via.gui.Texture", "setTexture");
 
@@ -188,15 +127,47 @@ CaptureResolutionInject::CaptureResolutionInject(reframework::API* api_instance)
     }
 }
 
-int CaptureResolutionInject::pre_gui_system_module_option_on_late_update(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
-    if (capture_resolution_inject_instance) {
-        capture_resolution_inject_instance->system_module_option_obj = reinterpret_cast<reframework::API::ManagedObject*>(argv[1]);
+bool CaptureResolutionInject::ensure_album_manager_and_fields() {
+    if (album_manager != nullptr) {
+        return true;
     }
 
-    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
-}
+    album_manager = api->get_managed_singleton("app.AlbumManager");
 
-void CaptureResolutionInject::post_gui_system_module_option_on_late_update(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
+    if (!album_manager) {
+        api->log_error("Failed to get AlbumManager singleton (deferred)");
+        return false;
+    }
+
+    render_target_texture_holder_field_16x9 = album_manager->get_field<reframework::API::ManagedObject*>("_RTT_16x9");
+    render_target_texture_holder_field_21x9 = album_manager->get_field<reframework::API::ManagedObject*>("_RTT_21x9");
+
+    // NOTE: Debugging, so log out the part where I add game-created render target, use mine instead
+    if (render_target_texture_holder_field_16x9) {
+        auto resource_16x9_default = *render_target_texture_holder_field_16x9;
+        if (resource_16x9_default) {
+            default_16x9_render_target_texture_holder = resource_16x9_default;
+            default_16x9_render_target_texture_holder->add_ref();
+        } else {
+            api->log_error("Failed to get default render target for 16x9 resolution. Field value is null!");
+        }
+    } else {
+        api->log_error("Failed to get default render target for 16x9 resolution");
+    }
+
+    if (render_target_texture_holder_field_21x9) {
+        auto resource_21x9_default = *render_target_texture_holder_field_21x9;
+        if (resource_21x9_default) {
+            default_21x9_render_target_texture_holder = resource_21x9_default;
+            default_21x9_render_target_texture_holder->add_ref();
+        } else {
+            api->log_error("Failed to get default render target for 21x9 resolution. Field value is null!");
+        }
+    } else {
+        api->log_error("Failed to get default render target for 21x9 resolution");
+    }
+
+    return true;
 }
 
 int CaptureResolutionInject::pre_gui070002_on_open(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
@@ -230,6 +201,48 @@ void CaptureResolutionInject::post_gui070002_on_close(void** ret_val, REFramewor
         capture_resolution_inject_instance->is_gui_quest_closed = false;
         capture_resolution_inject_instance->gui_quest_instance = nullptr;
     }
+}
+
+bool CaptureResolutionInject::get_screen_size(float& width, float& height) {
+    // Mirrors the REFramework Lua snippet:
+    //   local mgr = sdk.get_native_singleton("via.SceneManager")
+    //   local view = sdk.call_native_func(mgr, SceneManagerType, "get_MainView")
+    //   local size = view:get_Size()
+    //   return size.w, size.h
+    if (get_main_view_method == nullptr || get_size_method == nullptr) {
+        api->log_error("get_MainView/get_Size methods are null, can't query screen size");
+        return false;
+    }
+
+    auto scene_manager = api->get_native_singleton("via.SceneManager");
+
+    if (!scene_manager) {
+        api->log_error("Failed to get via.SceneManager native singleton");
+        return false;
+    }
+
+    auto main_view = get_main_view_method->call<void*>(api->get_vm_context(), scene_manager);
+
+    if (!main_view) {
+        api->log_error("Failed to get main view from via.SceneManager");
+        return false;
+    }
+
+    // via.SceneView::get_Size returns a via.Size { float w; float h; } value type.
+    // invoke() (the same path Lua's view:get_Size() uses) handles the value-type return.
+    auto size_result = get_size_method->invoke(reinterpret_cast<reframework::API::ManagedObject*>(main_view), std::span<void*>{});
+
+    if (size_result.exception_thrown) {
+        api->log_error("Exception thrown while calling via.SceneView.get_Size");
+        return false;
+    }
+
+    const auto* size_bytes = size_result.bytes.data();
+
+    width = *reinterpret_cast<const float*>(size_bytes);
+    height = *reinterpret_cast<const float*>(size_bytes + sizeof(float));
+
+    return true;
 }
 
 reframework::API::ManagedObject *CaptureResolutionInject::find_nearest_render_target_texture_holder(float current_width, float current_height, RenderTargetMap& render_target_map,
@@ -295,12 +308,7 @@ void CaptureResolutionInject::update_resolution() {
         return;
     }
 
-    if (!album_manager) {
-        return;
-    }
-
-    if (!get_resolution_method) {
-        api->log_error("getResolutionMethod is null");
+    if (!ensure_album_manager_and_fields()) {
         return;
     }
 
@@ -309,15 +317,40 @@ void CaptureResolutionInject::update_resolution() {
         return;
     }
 
-    float width_and_height[2];
-    get_resolution_method->call(width_and_height, api->get_vm_context(), system_module_option_obj);
+    float width = 0.0f;
+    float height = 0.0f;
 
-    bool is_widescreen = is_widescreen_method->call<bool>(api->get_vm_context(), nullptr);
+    if (!get_screen_size(width, height)) {
+        api->log_error("Failed to get screen size via via.SceneManager, falling back to default 16:9 resolution");
+        width = static_cast<float>(DEFAULT_RESOLUTION_16x9.first);
+        height = static_cast<float>(DEFAULT_RESOLUTION_16x9.second);
+    }
+
+    // Determine widescreen (21:9) from the AlbumManager's "_Is16x9" flag when possible,
+    // since that's the same flag that decides the target resolution of the captured photo
+    // (see WebPCaptureInjector). This correctly handles 21:9 being manually enabled on a
+    // 16:9 screen (letterboxed), where the game's own "isUltraWide()" may not reflect it.
+    bool is_widescreen = false;
+    bool has_is_16x9 = false;
+
+    if (album_manager != nullptr) {
+        auto is_16x9_ptr = album_manager->get_field<bool>("_Is16x9");
+        if (is_16x9_ptr != nullptr) {
+            is_widescreen = !(*is_16x9_ptr);
+            has_is_16x9 = true;
+        }
+    }
+
+    if (!has_is_16x9) {
+        is_widescreen = is_widescreen_method->call<bool>(api->get_vm_context(), nullptr);
+    }
+
+    api->log_info("Game resolution: %dx%d; is widescreen: %d", (int)width, (int)height, (int)is_widescreen);
 
     reframework::API::ManagedObject *best_resource_holder = nullptr;
 
     if (is_widescreen) {
-        auto best_21x9_render_target = find_nearest_render_target_texture_holder(width_and_height[0], width_and_height[1], capture_render_targets_by_resolution_21x9,
+        auto best_21x9_render_target = find_nearest_render_target_texture_holder(width, height, capture_render_targets_by_resolution_21x9,
             &current_resolution_21x9);
 
         if (!best_21x9_render_target) {
@@ -330,7 +363,7 @@ void CaptureResolutionInject::update_resolution() {
 
         *render_target_texture_holder_field_21x9 = best_resource_holder;
     } else {
-        auto best_16x9_render_target = find_nearest_render_target_texture_holder(width_and_height[0], width_and_height[1], capture_render_targets_by_resolution_16x9,
+        auto best_16x9_render_target = find_nearest_render_target_texture_holder(width, height, capture_render_targets_by_resolution_16x9,
             &current_resolution_16x9);
 
         if (!best_16x9_render_target) {
@@ -368,6 +401,10 @@ void CaptureResolutionInject::update_gui_texture() {
         return;
     }
 
+    if (!ensure_album_manager_and_fields()) {
+        return;
+    }
+
     if (!gui_quest_instance) {
         api->log_error("GUI quest instance is null, can't update texture");
         return;
@@ -394,11 +431,11 @@ void CaptureResolutionInject::update_gui_texture() {
         api->log_error("Failed to get GUI texture 21x9 field value");
     }
 
-    if (gui_texture_21x9) {
+    if (gui_texture_21x9 && render_target_texture_holder_field_21x9) {
         set_texture_method->call(vm_context, gui_texture_21x9, *render_target_texture_holder_field_21x9);
     }
 
-    if (gui_texture_16x9) {
+    if (gui_texture_16x9 && render_target_texture_holder_field_16x9) {
         set_texture_method->call(vm_context, gui_texture_16x9, *render_target_texture_holder_field_16x9);
     }
 }
@@ -408,11 +445,15 @@ void CaptureResolutionInject::revert() {
         return;
     }
 
-    if (*render_target_texture_holder_field_16x9) {
+    if (!ensure_album_manager_and_fields()) {
+        return;
+    }
+
+    if (render_target_texture_holder_field_16x9 && *render_target_texture_holder_field_16x9) {
         *render_target_texture_holder_field_16x9 = default_16x9_render_target_texture_holder;
     }
 
-    if (*render_target_texture_holder_field_21x9) {
+    if (render_target_texture_holder_field_21x9 && *render_target_texture_holder_field_21x9) {
         *render_target_texture_holder_field_21x9 = default_21x9_render_target_texture_holder;
     }
 }
