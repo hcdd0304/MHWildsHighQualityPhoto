@@ -272,7 +272,6 @@ void ReShadeAddOnInjectClient::do_prepare_capture() {
     freeze_timescale_frame_total = std::max<int>(MIN_FREEZE_TIMESCALE_FRAME_COUNT, mod_settings->freeze_game_frames);
     freeze_timescale_frame_left = freeze_timescale_frame_total;
     should_skip_camera_update = true;
-    hunter_set_mot_group_stance_params_cache.clear();
 
     game_ui_controller->hide_for(freeze_timescale_frame_total);
 }
@@ -365,12 +364,17 @@ void ReShadeAddOnInjectClient::late_update() {
 
         if (freeze_timescale_frame_left == 0) {
             target_timescale = previous_timescale;
-            execute_pending_mot_group_stance();
             time_scale_cached = false;
         }
 
         api->log_info("Freezing timescale, frame left: %d, total: %d, target frame scale: %f", freeze_timescale_frame_left, freeze_timescale_frame_total, target_timescale);
         set_timescale_method->call<void>(vm_context, target_timescale);
+    }
+
+    if (previous_frame_is_stance_caching == true && (previous_frame_is_stance_caching != is_mot_group_stance_caching))
+    {
+        previous_frame_is_stance_caching = false;
+        execute_pending_mot_group_stance();
     }
 }
 
@@ -404,6 +408,8 @@ void ReShadeAddOnInjectClient::launch_capture_implement() {
         auto request_capture = request_reshade_screen_capture(capture_screenshot_callback, mod_settings->hdr_bits, screenshot_before_reshade);
         if (request_capture != RESULT_SCREEN_CAPTURE_SUBMITTED) {
             api->log_error("Request capture failed %d", request_capture);
+            // The capture never started, so there's nothing more to cache.
+            is_mot_group_stance_caching = false;
             finish_capture(false);
         }
         else {
@@ -411,6 +417,8 @@ void ReShadeAddOnInjectClient::launch_capture_implement() {
         }
     } else {
         api->log_error("Failed to load reshade module");
+        // The capture never started, so there's nothing more to cache.
+        is_mot_group_stance_caching = false;
         finish_capture(false);
     }
 
@@ -613,6 +621,10 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
     if (result == RESULT_SCREEN_CAPTURE_DATA_DOWNLOADED) {
         api->log_info("Frame data downloaded, continuing camera");
 
+        // Done with the screenshot: stop caching mot group stance calls now that the game
+        // resumes. The cached calls are replayed later on the game thread.
+        reshade_addon_client_instance->is_mot_group_stance_caching = false;
+
         // Done with the screenshot, restore back the camera request
         reshade_addon_client_instance->restore_back_hunt_complete_camera_request();
         reshade_addon_client_instance->should_skip_camera_update = false;
@@ -716,6 +728,10 @@ void ReShadeAddOnInjectClient::capture_screenshot_callback(int result, int width
         api->log_info("Screen capture failed with error code: %d", result);
         reshade_addon_client_instance->finish_capture(false);
         reshade_addon_client_instance->done_capture = true;
+
+        // Stop caching since the capture is done (failed). Cached calls are replayed
+        // later on the game thread.
+        reshade_addon_client_instance->is_mot_group_stance_caching = false;
     }
 }
 
@@ -1057,13 +1073,22 @@ ReShadeAddOnInjectClient::ReShadeAddOnInjectClient() {
         api->log_error("Can't find HunterCharacter.cMotionSupporter.setHunterMotGroup_Stance method!");
     }
 
-    //set_mot_group_stance_method->add_hook(pre_motion_supporter_set_hunter_mot_group_stance_proxy, null_post, false);
+    set_mot_group_stance_method->add_hook(pre_motion_supporter_set_hunter_mot_group_stance_proxy, null_post, false);
 
-    auto quest_failed_action_enter = tdb->find_method("app.PlayerCommonAction.cQuestFailed", "doEnter");
-    if (quest_failed_action_enter == nullptr) {
-        api->log_error("Can't find PlayerCommonAction.cQuestFailed.doEnter method!");
+    // Start caching the mot group stance calls when the quest failed/cancel state is entered.
+    // Caching stays active until the screenshot capture is done.
+    auto quest_failed_state_enter = tdb->find_method("app.cQuestFailed", "enter");
+    if (quest_failed_state_enter == nullptr) {
+        api->log_error("Can't find app.cQuestFailed.enter method!");
     } else {
-        //quest_failed_action_enter->add_hook(pre_player_common_action_quest_failed_proxy, post_player_common_action_quest_failed_proxy, false);
+        quest_failed_state_enter->add_hook(pre_quest_failed_or_cancel_enter_proxy, null_post, false);
+    }
+
+    auto quest_cancel_state_enter = tdb->find_method("app.cQuestCancel", "enter");
+    if (quest_cancel_state_enter == nullptr) {
+        api->log_error("Can't find app.cQuestCancel.enter method!");
+    } else {
+        quest_cancel_state_enter->add_hook(pre_quest_failed_or_cancel_enter_proxy, null_post, false);
     }
 
     prepare_state = CapturePrepareState::None;
@@ -1087,65 +1112,39 @@ ReShadeAddOnInjectClient::~ReShadeAddOnInjectClient() {
     }
 }
 
-thread_local reframework::API::ManagedObject* current_action_chara = nullptr;
+int ReShadeAddOnInjectClient::pre_quest_failed_or_cancel_enter_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+    // Quest failed/cancel state entered: start caching the mot group stance calls.
+    // Caching stays active until the screenshot capture is done.
+    is_mot_group_stance_caching = true;
+    previous_frame_is_stance_caching = true;
 
-int ReShadeAddOnInjectClient::pre_player_common_action_quest_failed_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
-    auto action_ptr = reinterpret_cast<reframework::API::ManagedObject*>(argv[1]);
-    if (action_ptr == nullptr) {
-        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
-    }
+    hunter_set_mot_group_stance_params_cache.clear();
 
-    auto vm_context = reframework::API::get()->get_vm_context();
-    auto chara = action_ptr->call<reframework::API::ManagedObject*>("get_Chara", vm_context, action_ptr);
-
-    if (chara == nullptr) {
-        auto &api = reframework::API::get();
-        api->log_error("Failed to get chara from action in pre_player_common_action_quest_failed_impl");
-
-        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
-    }
-
-    current_action_chara = chara;
-
-    if (hunter_set_mot_group_stance_params_cache.contains(current_action_chara)) {
-        hunter_set_mot_group_stance_params_cache.erase(current_action_chara);
-    }
+    auto& api = reframework::API::get();
+    api->log_info("Quest failed/cancel state entered, starting to cache setHunterMotGroup_Stance calls");
 
     return REFRAMEWORK_HOOK_CALL_ORIGINAL;
-}
-
-void ReShadeAddOnInjectClient::post_player_common_action_quest_failed_impl(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
-    if (current_action_chara != nullptr) {
-        current_action_chara = nullptr;
-    }
 }
 
 int ReShadeAddOnInjectClient::pre_motion_supporter_set_hunter_mot_group_stance_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
-    if (current_action_chara != nullptr) {
-        auto vm_context = reframework::API::get()->get_vm_context();
-
-        HunterSetMotGroupStanceParams params = {
-            reinterpret_cast<std::uint64_t>(argv[1]),
-            reinterpret_cast<std::uint64_t>(argv[2]),
-            reinterpret_cast<std::uint64_t>(argv[3]),
-            reinterpret_cast<std::uint64_t>(argv[4]),
-            reinterpret_cast<std::uint64_t>(argv[5]),
-        };
-
-        if (!hunter_set_mot_group_stance_params_cache.contains(current_action_chara)) {
-            std::vector<HunterSetMotGroupStanceParams> params_vec = { params };
-            hunter_set_mot_group_stance_params_cache.emplace(current_action_chara, params_vec);
-        } else {
-            hunter_set_mot_group_stance_params_cache[current_action_chara].push_back(params);
-        }
-
-        auto &api = reframework::API::get();
-        api->log_info("Caching setHunterMotGroup_Stance call for chara 0x%llX, total pending calls for this chara: %zu", reinterpret_cast<uintptr_t>(current_action_chara), hunter_set_mot_group_stance_params_cache[current_action_chara].size());
-
-        return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
+    if (!is_mot_group_stance_caching) {
+        return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
-    return REFRAMEWORK_HOOK_CALL_ORIGINAL;
+    HunterSetMotGroupStanceParams params = {
+        reinterpret_cast<std::uint64_t>(argv[1]),
+        reinterpret_cast<std::uint64_t>(argv[2]),
+        reinterpret_cast<std::uint64_t>(argv[3]),
+        reinterpret_cast<std::uint64_t>(argv[4]),
+        reinterpret_cast<std::uint64_t>(argv[5]),
+    };
+
+    hunter_set_mot_group_stance_params_cache.push_back(params);
+
+    auto& api = reframework::API::get();
+    api->log_info("Caching setHunterMotGroup_Stance call, total pending calls: %zu", hunter_set_mot_group_stance_params_cache.size());
+
+    return REFRAMEWORK_HOOK_SKIP_ORIGINAL;
 }
 
 int ReShadeAddOnInjectClient::pre_motion_supporter_set_hunter_mot_group_stance_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
@@ -1156,34 +1155,22 @@ int ReShadeAddOnInjectClient::pre_motion_supporter_set_hunter_mot_group_stance_p
     return reshade_addon_client_instance->pre_motion_supporter_set_hunter_mot_group_stance_impl(argc, argv, arg_tys, ret_addr);
 }
 
-int ReShadeAddOnInjectClient::pre_player_common_action_quest_failed_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
+int ReShadeAddOnInjectClient::pre_quest_failed_or_cancel_enter_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr) {
     if (!reshade_addon_client_instance->get_is_enabled()) {
         return REFRAMEWORK_HOOK_CALL_ORIGINAL;
     }
 
-    return reshade_addon_client_instance->pre_player_common_action_quest_failed_impl(argc, argv, arg_tys, ret_addr);
-}
-
-void ReShadeAddOnInjectClient::post_player_common_action_quest_failed_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr) {
-    if (!reshade_addon_client_instance->get_is_enabled()) {
-        return;
-    }
-
-    reshade_addon_client_instance->post_player_common_action_quest_failed_impl(ret_val, ret_ty, ret_addr);
+    return reshade_addon_client_instance->pre_quest_failed_or_cancel_enter_impl(argc, argv, arg_tys, ret_addr);
 }
 
 void ReShadeAddOnInjectClient::execute_pending_mot_group_stance() {
     auto& api = reframework::API::get();
     auto vm_context = api->get_vm_context();
 
-    api->log_info("Executing pending setHunterMotGroup_Stance calls, total charas with pending calls: %zu", hunter_set_mot_group_stance_params_cache.size());
+    api->log_info("Executing pending setHunterMotGroup_Stance calls, total pending calls: %zu", hunter_set_mot_group_stance_params_cache.size());
 
-    for (auto& [chara, params_vec] : hunter_set_mot_group_stance_params_cache) {
-        api->log_info("Executing pending setHunterMotGroup_Stance for chara 0x%llX with %zu pending calls", reinterpret_cast<uintptr_t>(chara), params_vec.size());
-
-        for (auto& params : params_vec) {
-            set_mot_group_stance_method->call<void>(vm_context, params[0], params[1], params[2], params[3], params[4]);
-        }
+    for (auto& params : hunter_set_mot_group_stance_params_cache) {
+        set_mot_group_stance_method->call<void>(vm_context, params[0], params[1], params[2], params[3], params[4]);
     }
 
     hunter_set_mot_group_stance_params_cache.clear();

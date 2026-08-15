@@ -83,7 +83,12 @@ private:
     std::uint64_t player_camera_global_request_flags_backup = 0;
     std::vector<std::uint8_t> screenshot_data_cache;
 
-    std::unordered_map<reframework::API::ManagedObject*, std::vector<HunterSetMotGroupStanceParams>> hunter_set_mot_group_stance_params_cache;
+    std::vector<HunterSetMotGroupStanceParams> hunter_set_mot_group_stance_params_cache;
+    // While true, setHunterMotGroup_Stance calls are cached (skipped) instead of executed.
+    // Caching starts when the quest failed/cancel state is entered and stays active until the
+    // screenshot capture is done, at which point the cached calls are replayed.
+    bool is_mot_group_stance_caching = false;
+    bool previous_frame_is_stance_caching = false;
     reframework::API::Method *set_mot_group_stance_method = nullptr;
 
     bool done_capture = false;
@@ -103,13 +108,11 @@ private:
     static int pre_player_camera_controller_update_action(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
     static void post_player_camera_controller_update_action(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
 
-    int pre_player_common_action_quest_failed_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
-    void post_player_common_action_quest_failed_impl(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+    int pre_quest_failed_or_cancel_enter_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
 
     int pre_motion_supporter_set_hunter_mot_group_stance_impl(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
 
-    static int pre_player_common_action_quest_failed_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
-    static void post_player_common_action_quest_failed_proxy(void** ret_val, REFrameworkTypeDefinitionHandle ret_ty, unsigned long long ret_addr);
+    static int pre_quest_failed_or_cancel_enter_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
 
     static int pre_motion_supporter_set_hunter_mot_group_stance_proxy(int argc, void** argv, REFrameworkTypeDefinitionHandle* arg_tys, unsigned long long ret_addr);
 
